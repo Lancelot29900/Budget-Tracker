@@ -5,22 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Focale</title>
 <meta name="description" content="Suivi de budget personnel : comptes, transactions, prévisionnel, épargne et crédits. Fonctionne hors ligne, données gardées sur l'appareil.">
-<meta name="theme-color" content="#ECEEF4" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#07080D" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F4F3EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F0F10" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Focale">
-<link rel="manifest" href="manifest.webmanifest?v=1.5.0">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=1.5.0">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.5.0">
-<link rel="stylesheet" href="styles.css?v=1.5.0">
+<link rel="manifest" href="manifest.webmanifest?v=1.6.0">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=1.6.0">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.6.0">
+<link rel="stylesheet" href="styles.css?v=1.6.0">
 </head>
 <body>
 <div class="wrap">
   <header class="top" id="top" hidden>
     <div class="toprow">
-      <div class="brand"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lensg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9D8CFF"/><stop offset=".55" stop-color="#6FA8F0"/><stop offset="1" stop-color="#4FD1C1"/></linearGradient></defs><circle cx="16" cy="16" r="12.5" fill="none" stroke="url(#lensg)" stroke-width="3.2"/><path d="M9.6 12.2a7.2 7.2 0 0 1 6.4-3.9" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="16" r="3" fill="url(#lensg)"/></svg><h1 id="appName">Focale</h1><span id="status" class="status"></span></div>
+      <div class="brand"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11.5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="16" cy="16" r="3.4" fill="var(--accent)"/></svg><h1 id="appName">Focale</h1><span id="status" class="status"></span></div>
       <div class="controls">
         <select id="period" aria-label="Période"></select>
         <select id="year" aria-label="Année"></select>
@@ -28,12 +28,12 @@
       </div>
     </div>
     <nav class="tabs" role="tablist" aria-label="Sections">
-      <button role="tab" data-tab="apercu" aria-selected="true">Aperçu</button>
-      <button role="tab" data-tab="transactions" aria-selected="false">Transactions</button>
-      <button role="tab" data-tab="previsionnel" aria-selected="false">Prévisionnel</button>
-      <button role="tab" data-tab="epargne" aria-selected="false">Épargne</button>
-      <button role="tab" data-tab="credits" aria-selected="false">Crédits</button>
-      <button role="tab" data-tab="reglages" aria-selected="false">Réglages</button>
+      <button role="tab" data-tab="apercu" aria-selected="true"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h4v7H4zM10 8h4v12h-4zM16 4h4v16h-4z"/></svg><span class="tl">Aperçu</span><span class="ts">Aperçu</span></button>
+      <button role="tab" data-tab="transactions" aria-selected="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"/></svg><span class="tl">Transactions</span><span class="ts">Opérations</span></button>
+      <button role="tab" data-tab="previsionnel" aria-selected="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span class="tl">Prévisionnel</span><span class="ts">Prévu</span></button>
+      <button role="tab" data-tab="epargne" aria-selected="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M5 11l7-7 7 7"/></svg><span class="tl">Épargne</span><span class="ts">Épargne</span></button>
+      <button role="tab" data-tab="credits" aria-selected="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg><span class="tl">Crédits</span><span class="ts">Crédits</span></button>
+      <button role="tab" data-tab="reglages" aria-selected="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span class="tl">Réglages</span><span class="ts">Réglages</span></button>
     </nav>
   </header>
 
@@ -168,7 +168,7 @@
 <div id="toast" class="toast" role="status" hidden></div>
 <input type="file" id="fileJson" accept="application/json,.json" hidden>
 <input type="file" id="fileCsv" accept=".csv,text/csv,text/plain" hidden>
-<script src="app.js?v=1.5.0"></script>
+<script src="app.js?v=1.6.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '1.5.0';
+  const APP_VERSION = '1.6.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -25,10 +25,11 @@
     'Épargnes': ['Épargne de précaution','Projets','Vacances','Investissements'],
     Transferts: ['Virement interne','Retrait','Dépôt']
   };
-  const ACCENTS = [['Iris','#7B68F5'],['Lagon','#13998A'],['Saphir','#3A6FE0'],['Ambre','#C98316'],['Corail','#E0485E'],['Graphite','#5B6275']];
-  const OLD_DEFAULT_ACCENTS = ['#2C6A4D'];
-  const ACC_COLORS = ['#7B68F5', '#13998A', '#3A6FE0', '#E08A1E', '#E0485E', '#2FA36B', '#D45FA8', '#1E9BD7', '#8A6D3B', '#5B6275'];
-  const MARK_SVG = `<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lensg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9D8CFF"/><stop offset=".55" stop-color="#6FA8F0"/><stop offset="1" stop-color="#4FD1C1"/></linearGradient></defs><circle cx="16" cy="16" r="12.5" fill="none" stroke="url(#lensg)" stroke-width="3.2"/><path d="M9.6 12.2a7.2 7.2 0 0 1 6.4-3.9" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="16" r="3" fill="url(#lensg)"/></svg>`;
+  const ACCENTS = [['Pétrole','#1F6F7A'],['Encre','#2E4A8B'],['Forêt','#2F6B45'],['Brique','#B4532A'],['Prune','#7A3B5E'],['Graphite','#4A4A50']];
+  const OLD_DEFAULT_ACCENTS = ['#2C6A4D', '#7B68F5', '#13998A', '#3A6FE0', '#C98316', '#E0485E', '#5B6275'];
+  const ACC_COLORS = ['#2A8C99', '#C2703D', '#4F6BB0', '#6E8F3F', '#A8506B', '#8A7A5C', '#3F7F6E', '#B08A2E', '#6A5D9E', '#5F6368'];
+  const OLD_ACC_COLORS = ['#7B68F5', '#13998A', '#3A6FE0', '#E08A1E', '#E0485E', '#2FA36B', '#D45FA8', '#1E9BD7', '#8A6D3B', '#5B6275'];
+  const MARK_SVG = `<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11.5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="16" cy="16" r="3.4" fill="var(--accent)"/></svg>`;
   const COMMON_CURRENCIES = ['EUR','CHF','USD','GBP','CAD','MAD','TND','DZD','XOF','XAF'];
   const FALLBACK_CURRENCIES = ['EUR','CHF','USD','GBP','CAD','AUD','NZD','JPY','CNY','HKD','SGD','INR','BRL','MXN','ARS','CLP','COP','PEN','ZAR','MAD','TND','DZD','EGP','XOF','XAF','NGN','KES','TRY','ILS','AED','SAR','QAR','SEK','NOK','DKK','ISK','PLN','CZK','HUF','RON','BGN','RSD','UAH','RUB','THB','VND','IDR','MYR','PHP','KRW','TWD'];
   // Formats de nombres : une langue + un pays. Seuls ceux que le navigateur sait afficher sont proposés.
@@ -96,11 +97,11 @@
   function normalize(data) {
     const d = defaultCfg();
     const cfg = Object.assign({}, d, data.cfg || {});
-    if (OLD_DEFAULT_ACCENTS.includes(String(cfg.accent).toUpperCase()) || OLD_DEFAULT_ACCENTS.includes(cfg.accent)) cfg.accent = ACCENTS[0][1];
+    { const i = OLD_DEFAULT_ACCENTS.indexOf(String(cfg.accent).toUpperCase()); if (i >= 0) cfg.accent = ACCENTS[[0, 0, 0, 1, 3, 4, 5][i]][1]; }
     cfg.startDay = Math.min(28, Math.max(1, parseInt(cfg.startDay, 10) || 1));
     cfg.year = parseInt(cfg.year, 10) || d.year;
     cfg.accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).filter(a => a && a.name && a.name !== 'Externe').map(a => ({ id: a.id || uid(), name: String(a.name), start: r2(a.start), savings: !!a.savings, current: a.savings ? false : (a.current === undefined ? true : !!a.current), color: /^#[0-9a-f]{6}$/i.test(a.color || '') ? a.color : '' }));
-    cfg.accounts.forEach((a, i) => { if (!a.color) a.color = ACC_COLORS[i % ACC_COLORS.length]; });
+    cfg.accounts.forEach((a, i) => { const o = OLD_ACC_COLORS.indexOf(String(a.color).toUpperCase()); if (o >= 0) a.color = ACC_COLORS[o]; if (!a.color) a.color = ACC_COLORS[i % ACC_COLORS.length]; });
     const cats = {};
     for (const g of CAT_GROUPS) cats[g] = Array.isArray(cfg.categories?.[g]) ? [...new Set(cfg.categories[g].map(String).filter(Boolean))] : clone(DEFAULT_CATS[g]);
     cfg.categories = cats;
@@ -355,19 +356,34 @@
     return out.sort((a, z) => z.over - a.over);
   }
   /** Ce qui reste encore à passer ce mois-ci, d'après le prévisionnel (catégorie par catégorie, jamais négatif). */
+  /** Ce qui doit encore passer ce mois-ci d'après le prévisionnel, une fois retiré ce qui est déjà saisi. */
   function remainingThisMonth() {
     const tb = bm(todayStr()), p = String(tb.m), y = tb.y, b = budget(p, y);
-    const rest = (g, onlyIfNone) => r2(S.cfg.categories[g].reduce((a, c) => {
-      const pl = planned(g, c, p, y), re = b[g][c] || 0;
-      if (onlyIfNone) return a + (re > 0 ? 0 : pl);
-      return a + Math.max(0, pl - re);
-    }, 0));
+    const group = (g, done, onlyIfNone) => {
+      const items = [];
+      for (const c of S.cfg.categories[g]) {
+        const pl = planned(g, c, p, y), re = b[g][c] || 0;
+        const left = onlyIfNone ? (re > 0 ? 0 : pl) : Math.max(0, pl - re);
+        if (left >= 0.005) items.push({ cat: c, left: r2(left) });
+      }
+      let total = r2(items.reduce((s, i) => s + i.left, 0));
+      // ce qui a été fait sous une autre catégorie compte aussi : on plafonne au reste global
+      const cap = Math.max(0, r2(plannedTotal(g, p, y) - done));
+      if (!onlyIfNone && total > cap) {
+        let over = r2(total - cap);
+        for (const i of items.slice().sort((x, z) => x.left - z.left)) { const cut = Math.min(i.left, over); i.left = r2(i.left - cut); over = r2(over - cut); if (over <= 0) break; }
+        total = cap;
+      }
+      return { total: r2(total), items: items.filter(i => i.left >= 0.005).sort((x, z) => z.left - x.left), done: r2(done) };
+    };
+    const savAcc = new Set(S.cfg.accounts.filter(z => z.savings).map(z => z.name));
+    // un simple virement vers un livret compte aussi comme de l'épargne faite
+    const viaTransfer = r2(S.tx.filter(t => t.type === 'Transfert de fonds' && inPeriod(t, p, y)).reduce((s, t) => s + (savAcc.has(t.to) && !savAcc.has(t.from) ? t.amount : !savAcc.has(t.to) && savAcc.has(t.from) ? -t.amount : 0), 0));
+    const inc = group('Revenus', b.tot.Revenus, true), bil = group('Factures', b.tot.Factures), sav = group('Épargnes', r2(b.tot['Épargnes'] - b.tot.reprises + Math.max(0, viaTransfer)));
     return {
-      y, m: tb.m,
-      income: rest('Revenus', true),            // revenus prévus pas encore arrivés du tout
-      bills: rest('Factures'),                  // factures encore à prélever
-      savings: rest('Épargnes'),               // virements d'épargne encore prévus
-      spend: Math.max(0, r2(plannedTotal('Dépenses', p, y) - b.tot['Dépenses'])) // budget dépenses variables restant
+      y, m: tb.m, inc, bil, sav,
+      income: inc.total, bills: bil.total, savings: sav.total,
+      spend: Math.max(0, r2(plannedTotal('Dépenses', p, y) - b.tot['Dépenses']))
     };
   }
   function renderCashHero(box) {
@@ -401,13 +417,27 @@
     if (rm.income) parts.push(`+${money(rm.income)} de revenus attendus`);
     const after = parts.length ? `En comptant ce qui doit encore passer ce mois-ci (${parts.join(', ')}), ` : 'Une fois les opérations en attente passées, ';
     const deMois = (m) => (/^[aeiouy]/i.test(MONTHS[m - 1]) ? 'd’' : 'de ') + MONTHS[m - 1].toLowerCase();
+    const facts = [];
+    if (rm.sav.done) facts.push(`${money(rm.sav.done)} d’épargne`);
+    if (rm.bil.done) facts.push(`${money(rm.bil.done)} de factures`);
+    if (facts.length) txt.append(`Déjà passé ce mois-ci : ${facts.join(' et ')}, c’est compris dans les soldes ci-dessus. `);
     if (live >= 0) {
       txt.append(after, 'il te restera ', h('b', { text: money(live) }), ` pour finir ${MONTHS[rm.m - 1].toLowerCase()}, soit `, h('b', { text: `${money(live / daysLeft)} par jour` }), ` sur ${daysLeft} jour${daysLeft > 1 ? 's' : ''}.`);
       if (rm.spend > live + 0.5) txt.append(` C’est ${money(r2(rm.spend - live))} de moins que ton budget dépenses restant (${money(rm.spend)}).`);
     } else {
-      txt.append(after, 'il te manquera ', h('b', { class: 'neg', text: money(-live) }), ` sur tes comptes courants d’ici la fin ${deMois(rm.m)}. Pense à décaler un virement d’épargne ou à puiser dans une réserve.`);
+      txt.append(after, 'il te manquera ', h('b', { class: 'neg', text: money(-live) }), ` sur tes comptes courants d’ici la fin ${deMois(rm.m)}. ${rm.savings ? 'Pense à réduire ou décaler un virement d’épargne encore prévu, ou à puiser dans une réserve.' : 'Pense à puiser dans une réserve ou à transférer depuis un autre compte.'}`);
     }
     box.append(txt);
+    const det = [...rm.bil.items.map(i => [i.cat, -i.left, 'Facture', 'Factures']), ...rm.sav.items.map(i => [i.cat, -i.left, 'Épargne', 'Épargnes']), ...rm.inc.items.map(i => [i.cat, i.left, 'Revenu', 'Revenus'])];
+    const skip = (g, c, v) => {
+      const plan = (S.cfg.plan[rm.y] ||= {}); const arr = ((plan[g] ||= {})[c] ||= Array(12).fill(0));
+      arr[rm.m - 1] = r2(Math.max(0, (+arr[rm.m - 1] || 0) - Math.abs(v))); U.heroOpen = true; commit();
+      toast(`${c} : prévu d’${MONTHS[rm.m - 1].toLowerCase()} réduit de ${money(Math.abs(v))}.`);
+    };
+    if (det.length) box.append(h('details', { class: 'hero-det', open: !!U.heroOpen }, h('summary', { text: 'Ce qui est encore prévu ce mois-ci' }),
+      h('ul', null, ...det.map(([c, v, k, g]) => h('li', null, h('span', { class: 'mut', text: k + ' · ' }), c, h('span', { class: 'num' + (v > 0 ? ' pos' : ''), text: ' ' + sgn(v) }),
+        h('button', { class: 'btn small ghost', type: 'button', text: 'Ne passera pas', title: 'Retirer ce montant du prévu de ce mois', onclick: () => skip(g, c, v) })))),
+      h('p', { class: 'hint', text: 'Calculé avec ton prévisionnel : prévu du mois moins ce qui est déjà saisi. Si une ligne n’arrivera pas ce mois-ci, touche « Ne passera pas ».' })));
   }
 
   function renderApercu() {
@@ -796,11 +826,11 @@
         onclick: () => { recurFromTx(t); U.recurOpen = true; U.msg.recur = `« ${t.description || t.category} » ajoutée aux récurrentes (chaque mois le ${+t.date.slice(8, 10)}).`; commit(); setTimeout(() => $('c-recur').scrollIntoView({ behavior: 'smooth' }), 50); } });
       acts.append(mk, h('button', { class: 'btn small', type: 'button', text: 'Modifier', onclick: () => editTx(t) }), del);
       tb.append(h('tr', { class: (t.pointed ? '' : 'unpointed') + ' acc-row', style: mainA !== 'Externe' ? `--ac:${accColor(mainA)}` : null },
-        h('td', null, cb),
-        h('td', { class: 'num', text: `${t.date.slice(8, 10)}/${t.date.slice(5, 7)}` }),
-        h('td', null, h('div', null, typeChip(t.type), ' ', t.category), h('div', { class: 'desc tx-accs' }, ...[t.description ? h('span', { text: t.description + ' · ' }) : null, accPill(t.from), h('span', { class: 'arr', text: '→' }), accPill(t.to)].filter(Boolean))),
-        h('td', { class: 'r num ' + (sg > 0 ? 'pos' : '') }, ...[(sg > 0 ? '+' : sg < 0 ? '−' : '') + money(t.amount), fa ? h('div', { class: 'run-bal' + (run[t.id] < 0 ? ' neg' : ''), text: 'solde ' + money(run[t.id]) }) : null].filter(Boolean)),
-        h('td', null, acts)));
+        h('td', { class: 't-cb' }, cb),
+        h('td', { class: 'num t-date', text: `${t.date.slice(8, 10)}/${t.date.slice(5, 7)}` }),
+        h('td', { class: 't-main' }, h('div', null, typeChip(t.type), ' ', t.category), h('div', { class: 'desc tx-accs' }, ...[t.description ? h('span', { text: t.description + ' · ' }) : null, accPill(t.from), h('span', { class: 'arr', text: '→' }), accPill(t.to)].filter(Boolean))),
+        h('td', { class: 'r num t-amt ' + (sg > 0 ? 'pos' : '') }, ...[(sg > 0 ? '+' : sg < 0 ? '−' : '') + money(t.amount), fa ? h('div', { class: 'run-bal' + (run[t.id] < 0 ? ' neg' : ''), text: 'solde ' + money(run[t.id]) }) : null].filter(Boolean)),
+        h('td', { class: 't-acts' }, acts)));
     }
     if (!rows.length) tb.append(h('tr', null, h('td', { colspan: 5, class: 'mut', style: 'text-align:center;padding:24px', text: S.tx.length ? 'Aucune transaction ne correspond sur cette période.' : 'Aucune transaction pour l’instant. Ajoute la première avec le formulaire.' })));
     $('txlist').replaceChildren(h('thead', null, h('tr', null, h('th', { text: '✓' }), h('th', { text: 'Date' }), h('th', { text: 'Catégorie' }), h('th', { class: 'r', text: 'Montant' }), h('th'))), tb);
@@ -1496,7 +1526,7 @@
     return items.map(i => opt(i.tag, i.label, i.tag === cfg.locale));
   }
   function generalFields(cfg, onChange) {
-    const name = h('input', { type: 'text', id: 'g-name', value: cfg.appName, maxlength: 40 });
+    const name = h('input', { type: 'text', id: 'g-name', value: cfg.appName === 'Mon budget' ? '' : cfg.appName, placeholder: 'Mon budget', maxlength: 40 });
     name.addEventListener('change', () => { cfg.appName = name.value.trim() || 'Mon budget'; onChange(); });
     const cur = h('select', { id: 'g-cur' });
     const curName = (() => { try { const dn = new Intl.DisplayNames(['fr'], { type: 'currency' }); return (c) => dn.of(c) || c; } catch (e) { return (c) => c; } })();
@@ -1535,8 +1565,8 @@
         if (!v || v === 'Externe' || cfg.accounts.some(o => o !== a && o.name === v)) { msg.textContent = v === 'Externe' ? '« Externe » est réservé.' : 'Choisis un nom unique.'; name.value = a.name; return; }
         renameAccount(cfg, a, v, withData); onChange();
       });
-      const start = h('input', { type: 'text', inputmode: 'decimal', class: 'n', id: `acc-start-${a.id}`, value: num2.format(a.start), 'aria-label': 'Solde de départ' });
-      start.addEventListener('change', () => { const n = parseNum(start.value); if (Number.isFinite(n)) { a.start = r2(n); onChange(); } else start.value = num2.format(a.start); });
+      const start = h('input', { type: 'text', inputmode: 'decimal', class: 'n', id: `acc-start-${a.id}`, value: a.start ? num2.format(a.start) : '', placeholder: '0,00', 'aria-label': 'Solde de départ' });
+      start.addEventListener('change', () => { if (!start.value.trim()) { a.start = 0; onChange(); return; } const n = parseNum(start.value); if (Number.isFinite(n)) { a.start = r2(n); onChange(); } else start.value = a.start ? num2.format(a.start) : ''; });
       const sav = h('input', { type: 'checkbox', id: `acc-sav-${a.id}`, checked: a.savings, 'aria-label': 'Compte épargne' });
       sav.addEventListener('change', () => { a.savings = sav.checked; if (a.savings) a.current = false; onChange(); });
       const curr = h('input', { type: 'checkbox', id: `acc-cur-${a.id}`, checked: a.current, 'aria-label': 'Compte courant' });
@@ -1546,12 +1576,12 @@
       const move = (d) => { const j = i + d; if (j < 0 || j >= cfg.accounts.length) return; [cfg.accounts[i], cfg.accounts[j]] = [cfg.accounts[j], cfg.accounts[i]]; onChange(); };
       const removeAcc = () => { cfg.accounts.splice(i, 1); cfg.goals.forEach(g => { if (g.account === a.name) g.account = ''; }); U.delAcc = null; onChange(); };
       const del = h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', onclick: () => { if (!used && a.start === 0) removeAcc(); else { U.delAcc = a.id; onChange(); } } });
-      tb.append(h('tr', null,
+      tb.append(h('tr', { class: 'acc-edit-row' },
         h('td', { class: 'acc-col-cell' }, col),
         h('td', null, name, msg, used ? h('div', { class: 'hint', text: `${used} transaction${used > 1 ? 's' : ''}` }) : null),
-        h('td', { class: 'r' }, start),
-        h('td', { style: 'text-align:center' }, curr),
-        h('td', { style: 'text-align:center' }, sav),
+        h('td', { class: 'r acc-start' }, h('span', { class: 'm-lbl', text: 'Solde de départ' }), start),
+        h('td', { class: 'acc-flag' }, h('label', null, curr, h('span', { class: 'm-lbl', text: 'Courant' }))),
+        h('td', { class: 'acc-flag' }, h('label', null, sav, h('span', { class: 'm-lbl', text: 'Épargne' }))),
         h('td', null, h('div', { class: 'acts' },
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Monter', text: '↑', disabled: i === 0, onclick: () => move(-1) }),
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Descendre', text: '↓', disabled: i === cfg.accounts.length - 1, onclick: () => move(1) }),
@@ -1575,7 +1605,7 @@
         tb.append(h('tr', null, h('td', { colspan: 6, style: 'border-bottom:0;padding:0' }, box)));
       }
     });
-    const add = h('input', { type: 'text', id: 'acc-add', placeholder: 'Nouveau compte (ex. LEP, PEA, Compte joint)' });
+    const add = h('input', { type: 'text', id: 'acc-add', placeholder: 'Nouveau compte, ex. Livret A' });
     const addMsg = h('span', { class: 'warn' });
     const doAdd = () => { const v = add.value.trim(); if (!v) return; if (v === 'Externe' || cfg.accounts.some(a => a.name === v)) { addMsg.textContent = 'Ce nom existe déjà.'; return; } { const sv = /livret|lep|pel|cel|pea|assurance|épargne|epargne|cto|bourse/i.test(v); cfg.accounts.push({ id: uid(), name: v, start: 0, savings: sv, current: !sv, color: nextAccColor(cfg) }); } add.value = ''; onChange(); setTimeout(() => $('acc-add')?.focus(), 10); };
     add.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
