@@ -317,3 +317,22 @@ th{border-bottom-color:var(--line)}
 @media (max-width:760px){.sort-row{grid-template-columns:1fr 1fr}.sort-row .sort-what{grid-column:1/-1;flex-direction:row;gap:10px;align-items:baseline}.sort-row .acts{grid-column:1/-1;justify-content:flex-start}}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:20;display:flex;gap:14px;align-items:center;width:max-content;max-width:calc(100% - 32px);padding:10px 16px;border-radius:16px;background:var(--panel-strong);border:1px solid var(--line);box-shadow:0 12px 30px rgba(0,0,0,.3);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);font-size:13.5px}
 .toast button{border:0;background:none;color:var(--accent);font-weight:600;cursor:pointer;padding:0;font:inherit}
+/* v1.5 — couleurs de comptes, rapprochement */
+.acc-pill{display:inline-flex;align-items:center;gap:5px;padding:1px 8px 1px 6px;border-radius:999px;font-size:11.5px;line-height:1.6;background:color-mix(in srgb,var(--ac) 14%,transparent);color:var(--fg);white-space:nowrap}
+.acc-pill i{width:7px;height:7px;border-radius:50%;background:var(--ac);flex:none}
+.acc-pill.ext{background:var(--sunk);color:var(--muted)}
+.acc-pill.ext i{background:var(--muted);opacity:.5}
+.tx-accs{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:3px}
+.tx-accs .arr{color:var(--muted);font-size:11px}
+tr.acc-row td:first-child{box-shadow:inset 3px 0 0 var(--ac,transparent)}
+.run-bal{font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+.run-bal.neg{color:var(--neg,#E0485E)}
+.acc-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ac);margin-right:6px;vertical-align:1px}
+.acc-chip{border-top:2px solid color-mix(in srgb,var(--ac,transparent) 70%,transparent)}
+.acc-color{width:34px;height:28px;padding:0;border:1px solid var(--line);border-radius:8px;background:none;cursor:pointer}
+.acc-color::-webkit-color-swatch-wrapper{padding:3px}
+.acc-color::-webkit-color-swatch{border:0;border-radius:5px}
+.acc-col-cell{width:44px}
+.reconcile{margin:0 0 12px;padding:12px 14px;border-radius:14px;border:1px solid color-mix(in srgb,var(--ac) 35%,var(--line));background:color-mix(in srgb,var(--ac) 7%,transparent)}
+.rec-top{display:flex;flex-wrap:wrap;gap:14px;align-items:center;font-size:13.5px}
+.rec-top .acc-pill{font-size:13px;padding:2px 10px 2px 8px}

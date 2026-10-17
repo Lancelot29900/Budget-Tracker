@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '1.4.0';
+  const APP_VERSION = '1.5.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -27,6 +27,7 @@
   };
   const ACCENTS = [['Iris','#7B68F5'],['Lagon','#13998A'],['Saphir','#3A6FE0'],['Ambre','#C98316'],['Corail','#E0485E'],['Graphite','#5B6275']];
   const OLD_DEFAULT_ACCENTS = ['#2C6A4D'];
+  const ACC_COLORS = ['#7B68F5', '#13998A', '#3A6FE0', '#E08A1E', '#E0485E', '#2FA36B', '#D45FA8', '#1E9BD7', '#8A6D3B', '#5B6275'];
   const MARK_SVG = `<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lensg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9D8CFF"/><stop offset=".55" stop-color="#6FA8F0"/><stop offset="1" stop-color="#4FD1C1"/></linearGradient></defs><circle cx="16" cy="16" r="12.5" fill="none" stroke="url(#lensg)" stroke-width="3.2"/><path d="M9.6 12.2a7.2 7.2 0 0 1 6.4-3.9" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="16" r="3" fill="url(#lensg)"/></svg>`;
   const COMMON_CURRENCIES = ['EUR','CHF','USD','GBP','CAD','MAD','TND','DZD','XOF','XAF'];
   const FALLBACK_CURRENCIES = ['EUR','CHF','USD','GBP','CAD','AUD','NZD','JPY','CNY','HKD','SGD','INR','BRL','MXN','ARS','CLP','COP','PEN','ZAR','MAD','TND','DZD','EGP','XOF','XAF','NGN','KES','TRY','ILS','AED','SAR','QAR','SEK','NOK','DKK','ISK','PLN','CZK','HUF','RON','BGN','RSD','UAH','RUB','THB','VND','IDR','MYR','PHP','KRW','TWD'];
@@ -98,7 +99,8 @@
     if (OLD_DEFAULT_ACCENTS.includes(String(cfg.accent).toUpperCase()) || OLD_DEFAULT_ACCENTS.includes(cfg.accent)) cfg.accent = ACCENTS[0][1];
     cfg.startDay = Math.min(28, Math.max(1, parseInt(cfg.startDay, 10) || 1));
     cfg.year = parseInt(cfg.year, 10) || d.year;
-    cfg.accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).filter(a => a && a.name && a.name !== 'Externe').map(a => ({ id: a.id || uid(), name: String(a.name), start: r2(a.start), savings: !!a.savings, current: a.savings ? false : (a.current === undefined ? true : !!a.current) }));
+    cfg.accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).filter(a => a && a.name && a.name !== 'Externe').map(a => ({ id: a.id || uid(), name: String(a.name), start: r2(a.start), savings: !!a.savings, current: a.savings ? false : (a.current === undefined ? true : !!a.current), color: /^#[0-9a-f]{6}$/i.test(a.color || '') ? a.color : '' }));
+    cfg.accounts.forEach((a, i) => { if (!a.color) a.color = ACC_COLORS[i % ACC_COLORS.length]; });
     const cats = {};
     for (const g of CAT_GROUPS) cats[g] = Array.isArray(cfg.categories?.[g]) ? [...new Set(cfg.categories[g].map(String).filter(Boolean))] : clone(DEFAULT_CATS[g]);
     cfg.categories = cats;
@@ -174,6 +176,9 @@
   const inPeriod = (t, p = U.period, y = U.year) => { const b = bm(t.date); return b.y === y && (p === 'year' || b.m === +p); };
   const periodLabel = (p = U.period) => p === 'year' ? `l'année ${U.year}` : `${MONTHS[+p - 1].toLowerCase()} ${U.year}`;
   const accNames = () => S.cfg.accounts.map(a => a.name);
+  const accColor = (name) => S.cfg.accounts.find(a => a.name === name)?.color || 'var(--muted)';
+  const accPill = (name) => h('span', { class: 'acc-pill' + (name === 'Externe' ? ' ext' : ''), style: name === 'Externe' ? null : `--ac:${accColor(name)}` }, h('i'), name);
+  const nextAccColor = (cfg) => ACC_COLORS.find(c => !cfg.accounts.some(a => a.color === c)) || ACC_COLORS[cfg.accounts.length % ACC_COLORS.length];
   const savingsAccs = () => S.cfg.accounts.filter(a => a.savings).map(a => a.name);
   const mainAcc = () => (S.cfg.accounts.find(a => !a.savings) || S.cfg.accounts[0] || { name: 'Externe' }).name;
 
@@ -378,8 +383,8 @@
     const chips = h('div', { class: 'acc-chips' });
     for (const a of list) {
       const r = real[a.name], f = fut[a.name], pending = r2(f - r);
-      chips.append(h('div', { class: 'acc-chip' + (f < 0 ? ' low' : '') },
-        h('span', { class: 'acc-name', text: a.name }),
+      chips.append(h('div', { class: 'acc-chip' + (f < 0 ? ' low' : ''), style: `--ac:${a.color}` },
+        h('span', { class: 'acc-name' }, h('i', { class: 'acc-dot' }), a.name),
         h('span', { class: 'acc-val num' + (r < 0 ? ' neg' : ''), text: money(r) }),
         h('span', { class: 'acc-sub', text: Math.abs(pending) >= 0.005 ? `${money(f)} après ${pending < 0 ? 'les débits' : 'les opérations'} en attente (${sgn(pending)})` : 'rien en attente' })));
     }
@@ -683,6 +688,7 @@
     if (values.includes(cur)) sel.value = cur;
   }
   function refreshFormOptions() {
+    { const cur = $('fa').value; $('fa').replaceChildren(opt('', 'Tous les comptes'), ...accNames().map(n => opt(n, n, n === cur))); }
     fillSelect($('f-cat'), catsFor($('f-type').value));
     const accs = ['Externe', ...accNames()];
     fillSelect($('f-from'), accs); fillSelect($('f-to'), accs);
@@ -754,7 +760,17 @@
   }
   function renderList() {
     const q = $('q').value.trim().toLowerCase(), ft = $('ft').value, fp = $('fp').value;
+    const fa = accNames().includes($('fa').value) ? $('fa').value : '';
     let rows = S.tx.filter(t => inPeriod(t));
+    if (fa) rows = rows.filter(t => t.from === fa || t.to === fa);
+    // solde du compte après chaque opération (toutes dates, pointées ou non)
+    const run = {};
+    if (fa) {
+      let bal = S.cfg.accounts.find(x => x.name === fa).start;
+      for (const t of S.tx.filter(t => t.from === fa || t.to === fa).sort((x, y) => x.date.localeCompare(y.date) || String(x.id).localeCompare(String(y.id)))) {
+        if (t.from === fa) bal -= t.amount; if (t.to === fa) bal += t.amount; run[t.id] = r2(bal);
+      }
+    }
     if (ft) rows = rows.filter(t => t.type === ft);
     if (fp) rows = rows.filter(t => String(+!!t.pointed) === fp);
     if (q) rows = rows.filter(t => [t.category, t.description, t.type, t.from, t.to, money(t.amount), String(t.amount)].join(' ').toLowerCase().includes(q));
@@ -762,9 +778,11 @@
     const unp = rows.filter(t => !t.pointed).length;
     $('list-title').textContent = `Transactions · ${U.period === 'year' ? 'année ' + U.year : MONTHS[+U.period - 1] + ' ' + U.year}`;
     $('list-note').textContent = `${rows.length} transaction${rows.length > 1 ? 's' : ''}${unp ? `, dont ${unp} non pointée${unp > 1 ? 's' : ''}` : ''}. Coche pour pointer, « Modifier » pour corriger.`;
+    renderReconcile(fa);
     const tb = h('tbody');
     for (const t of rows) {
-      const sg = (t.type === 'Revenus' || t.type === 'Remboursement') ? 1 : (t.type === 'Dépenses' || t.type === 'Factures') ? -1 : 0;
+      const sg = fa ? (t.to === fa ? 1 : -1) : (t.type === 'Revenus' || t.type === 'Remboursement') ? 1 : (t.type === 'Dépenses' || t.type === 'Factures') ? -1 : 0;
+      const mainA = t.from !== 'Externe' ? t.from : t.to;
       const cb = h('input', { type: 'checkbox', 'aria-label': 'Pointée', checked: t.pointed });
       cb.addEventListener('change', () => { t.pointed = cb.checked; commit(); });
       const acts = h('div', { class: 'acts' });
@@ -777,15 +795,55 @@
       const mk = h('button', { class: 'btn small ghost', type: 'button', text: '↻', title: t.recurId ? 'Issue d’une récurrente' : 'Rendre récurrente (chaque mois)', 'aria-label': 'Rendre récurrente', disabled: !!t.recurId || null,
         onclick: () => { recurFromTx(t); U.recurOpen = true; U.msg.recur = `« ${t.description || t.category} » ajoutée aux récurrentes (chaque mois le ${+t.date.slice(8, 10)}).`; commit(); setTimeout(() => $('c-recur').scrollIntoView({ behavior: 'smooth' }), 50); } });
       acts.append(mk, h('button', { class: 'btn small', type: 'button', text: 'Modifier', onclick: () => editTx(t) }), del);
-      tb.append(h('tr', { class: t.pointed ? '' : 'unpointed' },
+      tb.append(h('tr', { class: (t.pointed ? '' : 'unpointed') + ' acc-row', style: mainA !== 'Externe' ? `--ac:${accColor(mainA)}` : null },
         h('td', null, cb),
         h('td', { class: 'num', text: `${t.date.slice(8, 10)}/${t.date.slice(5, 7)}` }),
-        h('td', null, h('div', null, typeChip(t.type), ' ', t.category), h('div', { class: 'desc', text: [t.description, `${t.from} → ${t.to}`].filter(Boolean).join(' · ') })),
-        h('td', { class: 'r num ' + (sg > 0 ? 'pos' : ''), text: (sg > 0 ? '+' : sg < 0 ? '−' : '') + money(t.amount) }),
+        h('td', null, h('div', null, typeChip(t.type), ' ', t.category), h('div', { class: 'desc tx-accs' }, ...[t.description ? h('span', { text: t.description + ' · ' }) : null, accPill(t.from), h('span', { class: 'arr', text: '→' }), accPill(t.to)].filter(Boolean))),
+        h('td', { class: 'r num ' + (sg > 0 ? 'pos' : '') }, ...[(sg > 0 ? '+' : sg < 0 ? '−' : '') + money(t.amount), fa ? h('div', { class: 'run-bal' + (run[t.id] < 0 ? ' neg' : ''), text: 'solde ' + money(run[t.id]) }) : null].filter(Boolean)),
         h('td', null, acts)));
     }
     if (!rows.length) tb.append(h('tr', null, h('td', { colspan: 5, class: 'mut', style: 'text-align:center;padding:24px', text: S.tx.length ? 'Aucune transaction ne correspond sur cette période.' : 'Aucune transaction pour l’instant. Ajoute la première avec le formulaire.' })));
     $('txlist').replaceChildren(h('thead', null, h('tr', null, h('th', { text: '✓' }), h('th', { text: 'Date' }), h('th', { text: 'Catégorie' }), h('th', { class: 'r', text: 'Montant' }), h('th'))), tb);
+  }
+
+  /** Rapprochement : comparer le solde calculé à celui affiché par la banque. */
+  function renderReconcile(fa) {
+    const box = $('reconcile');
+    if (!fa) { box.hidden = true; box.replaceChildren(); return; }
+    if (box.contains(document.activeElement) && !box.hidden && box.dataset.acc === fa) return;
+    box.dataset.acc = fa;
+    const acc = S.cfg.accounts.find(x => x.name === fa);
+    const { real, fut } = balances();
+    const r = real[fa], f = fut[fa];
+    const unp = S.tx.filter(t => !t.pointed && (t.from === fa || t.to === fa));
+    const inp = h('input', { type: 'text', inputmode: 'decimal', id: 'rec-bank', placeholder: 'Solde affiché par ta banque', 'aria-label': 'Solde affiché par ta banque' });
+    const out = h('p', { class: 'hint', style: 'margin:6px 0 0' });
+    const fix = h('button', { class: 'btn small', type: 'button', text: 'Recaler' }); fix.hidden = true;
+    const check = () => {
+      const v = parseNum(inp.value); fix.hidden = true;
+      if (!inp.value.trim() || !Number.isFinite(v)) { out.textContent = ''; return; }
+      const d = r2(v - r);
+      if (Math.abs(d) < 0.005) { out.textContent = 'Parfait, le solde pointé correspond à ta banque.'; return; }
+      const same = S.tx.filter(t => (t.from === fa || t.to === fa) && Math.abs(t.amount - Math.abs(d)) < 0.005).slice(-3);
+      const pend = unp.reduce((s, t) => s + (t.to === fa ? t.amount : -t.amount), 0);
+      let tip = '';
+      if (Math.abs(r2(pend) - d) < 0.005) tip = ' C’est exactement le montant des opérations non pointées : pointe-les si elles sont passées.';
+      else if (same.length) tip = ` Une opération de ${money(Math.abs(d))} existe déjà (${same.map(t => `${t.date.slice(8, 10)}/${t.date.slice(5, 7)} ${t.description || t.category}`).join(', ')}) : vérifie un doublon, un oubli ou un sens inversé.`;
+      else tip = ' Filtre ce compte mois par mois et compare avec tes relevés pour trouver l’opération manquante, ou recale le solde de départ.';
+      out.textContent = `Écart de ${sgn(d)} entre ta banque et l’app.${tip}`;
+      fix.hidden = false;
+      fix.onclick = () => { acc.start = r2(acc.start + d); box.dataset.acc = ''; document.activeElement?.blur(); commit(); toast(`Solde de départ de ${fa} ajusté de ${sgn(d)}. Le solde pointé est maintenant ${money(v)}.`); };
+    };
+    inp.addEventListener('input', check);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !fix.hidden) fix.click(); });
+    box.hidden = false;
+    box.style.setProperty('--ac', acc.color);
+    box.replaceChildren(
+      h('div', { class: 'rec-top' }, ...[accPill(fa),
+        h('span', null, 'Pointé ', h('b', { class: 'num' + (r < 0 ? ' neg' : ''), text: money(r) })),
+        unp.length ? h('span', { class: 'mut' }, `Avec ${unp.length} non pointée${unp.length > 1 ? 's' : ''} : `, h('b', { class: 'num', text: money(f) })) : null].filter(Boolean)),
+      h('div', { class: 'addrow', style: 'margin-top:8px' }, inp, fix), out,
+      h('p', { class: 'hint', style: 'margin:6px 0 0', text: 'Recaler modifie le solde de départ du compte : tes statistiques ne bougent pas, seul le solde est corrigé.' }));
   }
 
   // ---------------------------------------------------------------- opérations récurrentes
@@ -975,7 +1033,7 @@
     const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0];
     return best && accNames().includes(best[0]) ? best[0] : mainAcc();
   }
-  /** Lit une ligne comme « 12,50 feuillette », « Leclerc 45 € hier », « +70 covoit 12/10 ». */
+  /** Lit une ligne comme « 12,50 boulangerie », « Essence 45 € hier », « +20 remboursement 12/10 ». */
   function parseExpress(line) {
     let s = String(line || '').replace(/[€$£]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!s) return null;
@@ -1055,7 +1113,7 @@
   function renderExpress() {
     const box = $('c-express');
     if (box.contains(document.activeElement) && document.activeElement.id === 'ex-in') { updateExpressPreview(); return; }
-    const inp = h('input', { type: 'text', id: 'ex-in', placeholder: 'ex. 9,50 feuillette · 45 essence hier · +70 covoit', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Saisie express' });
+    const inp = h('input', { type: 'text', id: 'ex-in', placeholder: 'ex. 12,50 boulangerie · 45 essence hier · +20 remboursement', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Saisie express' });
     const prev = h('div', { class: 'ex-preview', id: 'ex-prev' });
     inp.addEventListener('input', updateExpressPreview);
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const c = addExpressLines(inp.value); if (c.length) { inp.value = ''; announce(c); updateExpressPreview(); } } });
@@ -1115,7 +1173,7 @@
       h('p', { class: 'note', text: 'Elles comptent déjà dans tes soldes et tes dépenses. Choisis une catégorie : l’app s’en souviendra pour la prochaine fois.' }),
       h('div', { class: 'sort-list' }, ...rows));
   }
-  /** Ouverture par lien : ?saisie=12,50%20feuillette (plusieurs lignes séparées par %0A ou ;). */
+  /** Ouverture par lien : ?saisie=12,50%20boulangerie (plusieurs lignes séparées par %0A ou ;). */
   function handleLaunchParams() {
     let q = null;
     try { const u = new URL(location.href); q = u.searchParams.get('saisie') || u.searchParams.get('add'); if (q) { u.searchParams.delete('saisie'); u.searchParams.delete('add'); history.replaceState(null, '', u.pathname + (u.search || '') + '#transactions'); } } catch (e) {}
@@ -1483,10 +1541,13 @@
       sav.addEventListener('change', () => { a.savings = sav.checked; if (a.savings) a.current = false; onChange(); });
       const curr = h('input', { type: 'checkbox', id: `acc-cur-${a.id}`, checked: a.current, 'aria-label': 'Compte courant' });
       curr.addEventListener('change', () => { a.current = curr.checked; if (a.current) a.savings = false; onChange(); });
+      const col = h('input', { type: 'color', class: 'acc-color', id: `acc-col-${a.id}`, value: a.color || ACC_COLORS[i % ACC_COLORS.length], 'aria-label': 'Couleur du compte', title: 'Couleur du compte' });
+      col.addEventListener('change', () => { a.color = col.value; onChange(); });
       const move = (d) => { const j = i + d; if (j < 0 || j >= cfg.accounts.length) return; [cfg.accounts[i], cfg.accounts[j]] = [cfg.accounts[j], cfg.accounts[i]]; onChange(); };
       const removeAcc = () => { cfg.accounts.splice(i, 1); cfg.goals.forEach(g => { if (g.account === a.name) g.account = ''; }); U.delAcc = null; onChange(); };
       const del = h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', onclick: () => { if (!used && a.start === 0) removeAcc(); else { U.delAcc = a.id; onChange(); } } });
       tb.append(h('tr', null,
+        h('td', { class: 'acc-col-cell' }, col),
         h('td', null, name, msg, used ? h('div', { class: 'hint', text: `${used} transaction${used > 1 ? 's' : ''}` }) : null),
         h('td', { class: 'r' }, start),
         h('td', { style: 'text-align:center' }, curr),
@@ -1511,17 +1572,17 @@
             } })) : null,
             h('button', { class: 'btn small danger', type: 'button', text: used ? `Supprimer le compte et ses ${used} transaction${used > 1 ? 's' : ''}` : 'Supprimer', onclick: () => { if (S) S.tx = S.tx.filter(t => t.from !== a.name && t.to !== a.name); removeAcc(); } }),
             h('button', { class: 'btn small', type: 'button', text: 'Annuler', onclick: () => { U.delAcc = null; onChange(); } })));
-        tb.append(h('tr', null, h('td', { colspan: 5, style: 'border-bottom:0;padding:0' }, box)));
+        tb.append(h('tr', null, h('td', { colspan: 6, style: 'border-bottom:0;padding:0' }, box)));
       }
     });
     const add = h('input', { type: 'text', id: 'acc-add', placeholder: 'Nouveau compte (ex. LEP, PEA, Compte joint)' });
     const addMsg = h('span', { class: 'warn' });
-    const doAdd = () => { const v = add.value.trim(); if (!v) return; if (v === 'Externe' || cfg.accounts.some(a => a.name === v)) { addMsg.textContent = 'Ce nom existe déjà.'; return; } { const sv = /livret|lep|pel|cel|pea|assurance|épargne|epargne|cto|bourse/i.test(v); cfg.accounts.push({ id: uid(), name: v, start: 0, savings: sv, current: !sv }); } add.value = ''; onChange(); setTimeout(() => $('acc-add')?.focus(), 10); };
+    const doAdd = () => { const v = add.value.trim(); if (!v) return; if (v === 'Externe' || cfg.accounts.some(a => a.name === v)) { addMsg.textContent = 'Ce nom existe déjà.'; return; } { const sv = /livret|lep|pel|cel|pea|assurance|épargne|epargne|cto|bourse/i.test(v); cfg.accounts.push({ id: uid(), name: v, start: 0, savings: sv, current: !sv, color: nextAccColor(cfg) }); } add.value = ''; onChange(); setTimeout(() => $('acc-add')?.focus(), 10); };
     add.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
     return h('div', null,
-      h('div', { class: 'scroll' }, h('table', { class: 'edit-table' }, h('thead', null, h('tr', null, h('th', { text: 'Compte' }), h('th', { class: 'r', text: 'Solde de départ' }), h('th', { style: 'text-align:center', text: 'Courant' }), h('th', { style: 'text-align:center', text: 'Épargne' }), h('th'))), tb)),
+      h('div', { class: 'scroll' }, h('table', { class: 'edit-table' }, h('thead', null, h('tr', null, h('th', { text: 'Couleur' }), h('th', { text: 'Compte' }), h('th', { class: 'r', text: 'Solde de départ' }), h('th', { style: 'text-align:center', text: 'Courant' }), h('th', { style: 'text-align:center', text: 'Épargne' }), h('th'))), tb)),
       h('div', { class: 'addrow' }, add, h('button', { class: 'btn', type: 'button', text: 'Ajouter', onclick: doAdd })), addMsg,
-      h('p', { class: 'hint', text: 'Le solde de départ est celui du compte avant la première transaction saisie. Coche « Courant » pour les comptes du quotidien (ils forment le disponible en haut de l’Aperçu) et « Épargne » pour les livrets, assurance-vie, PEA… Un compte peut n’être ni l’un ni l’autre (compte commun, carte titres-restaurant…).' }));
+      h('p', { class: 'hint', text: 'Le solde de départ est celui du compte avant la première transaction saisie. Coche « Courant » pour les comptes du quotidien (ils forment le disponible en haut de l’Aperçu) et « Épargne » pour les livrets, assurance-vie, PEA… Un compte peut n’être ni l’un ni l’autre (compte commun, carte titres-restaurant…). La couleur sert à repérer le compte dans la liste des transactions.' }));
   }
 
   function categoriesEditor(cfg, onChange, withData) {
@@ -1608,6 +1669,13 @@
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (S && U.tab === 'reglages') renderSoon(); });
   window.addEventListener('appinstalled', () => { installEvt = null; renderSoon(); });
 
+  function shareBox() {
+    const url = location.origin + location.pathname.replace(/index\.html$/, '');
+    const field = h('input', { type: 'text', readonly: true, value: url, 'aria-label': 'Lien de l’app', onclick: (e) => e.target.select() });
+    const copy = h('button', { class: 'btn', type: 'button', text: 'Copier le lien', onclick: async () => { try { await navigator.clipboard.writeText(url); toast('Lien copié.'); } catch (e) { field.select(); toast('Sélectionne le lien et copie-le (Cmd+C).'); } } });
+    const share = navigator.share ? h('button', { class: 'btn primary', type: 'button', text: 'Partager…', onclick: () => navigator.share({ title: S.cfg.appName || 'Focale', text: 'Une petite app de budget à essayer :', url }).catch(() => {}) }) : null;
+    return h('div', { class: 'addrow' }, ...[field, copy, share].filter(Boolean));
+  }
   function renderSettings() {
     const on = () => commit();
     const sec = (id, title, note, body) => h('div', { class: 'card', id }, h('h2', { text: title }), note ? h('p', { class: 'note', text: note }) : null, body);
@@ -1641,6 +1709,7 @@
       sec('set-cats', 'Catégories', 'Renommer une catégorie met à jour ses transactions et ton prévisionnel. Une catégorie utilisée ne peut pas être supprimée.', categoriesEditor(S.cfg, on, true)),
       sec('set-goals', 'Objectifs d’épargne', null, goalsEditor(S.cfg, on)),
       sec('set-loans', 'Crédits & dettes', null, loansEditor(S.cfg, on)),
+      sec('set-share', 'Faire essayer l’app', 'Envoie ce lien : la personne part d’une app vide, avec ses propres données sur son appareil. Rien de ce que tu as saisi n’est partagé.', shareBox()),
       sec('set-install', 'Installer sur cet appareil', `L’app fonctionne hors ligne une fois installée. Version ${APP_VERSION}.`, install),
       sec('set-data', 'Données & sauvegardes', null, data)));
     if (U.settingsFocus) { const el = $(U.settingsFocus === 'goals' ? 'set-goals' : 'set-loans'); U.settingsFocus = null; setTimeout(() => el?.scrollIntoView({ behavior: 'smooth' }), 30); }
@@ -1706,7 +1775,7 @@
       const defFrom = (type === 'Revenus' || type === 'Remboursement') ? 'Externe' : mainAcc();
       const defTo = (type === 'Revenus' || type === 'Remboursement') ? mainAcc() : 'Externe';
       const from = (ix.from >= 0 && c[ix.from]) || defFrom, to = (ix.to >= 0 && c[ix.to]) || defTo;
-      for (const a of [from, to]) if (a !== 'Externe' && !accNames().includes(a)) { S.cfg.accounts.push({ id: uid(), name: a, start: 0, savings: false }); newAccs.add(a); }
+      for (const a of [from, to]) if (a !== 'Externe' && !accNames().includes(a)) { S.cfg.accounts.push({ id: uid(), name: a, start: 0, savings: false, current: true, color: nextAccColor(S.cfg) }); newAccs.add(a); }
       const ptRaw = ix.pt >= 0 ? norm(c[ix.pt] || '') : 'oui';
       S.tx.push({ id: uid(), date, amount, type, category: cat, from, to, description: ix.desc >= 0 ? (c[ix.desc] || '') : '', pointed: !['non', 'faux', 'false', 'no', '0'].includes(ptRaw) });
       added++;
@@ -1813,6 +1882,7 @@
     // contrôles statiques
     $('f-type').replaceChildren(...TYPES.map(t => opt(t)));
     $('ft').replaceChildren(opt('', 'Tous les types'), ...TYPES.map(t => opt(t)));
+    
     $('period').addEventListener('change', () => { U.period = $('period').value; if (U.tab === 'transactions' && !U.editing) resetForm(); render(); });
     $('year').addEventListener('change', () => { U.year = +$('year').value; if (U.tab === 'transactions' && !U.editing) resetForm(); render(); });
     document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -1821,7 +1891,7 @@
     $('f-cat').addEventListener('change', () => applyDefaults(true));
     $('txf').addEventListener('submit', onSubmit);
     $('f-cancel').addEventListener('click', resetForm);
-    for (const id of ['q', 'ft', 'fp']) $(id).addEventListener('input', renderList);
+    for (const id of ['q', 'ft', 'fp', 'fa']) $(id).addEventListener('input', renderList);
     $('leaveSample').addEventListener('click', () => { try { localStorage.removeItem(KEY); } catch (e) {} S = null; U.draft = null; U.onbStep = 0; render(); });
     readFile($('fileJson'), (name, text) => {
       let data; try { data = parseBackup(text); } catch (e) {
