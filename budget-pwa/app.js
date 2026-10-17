@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.2.2';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -1270,7 +1270,8 @@
       const sav = h('input', { type: 'checkbox', id: `acc-sav-${a.id}`, checked: a.savings, 'aria-label': 'Compte épargne' });
       sav.addEventListener('change', () => { a.savings = sav.checked; onChange(); });
       const move = (d) => { const j = i + d; if (j < 0 || j >= cfg.accounts.length) return; [cfg.accounts[i], cfg.accounts[j]] = [cfg.accounts[j], cfg.accounts[i]]; onChange(); };
-      const del = h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', disabled: used > 0, title: used ? `Utilisé par ${used} transaction(s) : renomme-le plutôt` : null, onclick: () => { cfg.accounts.splice(i, 1); onChange(); } });
+      const removeAcc = () => { cfg.accounts.splice(i, 1); cfg.goals.forEach(g => { if (g.account === a.name) g.account = ''; }); U.delAcc = null; onChange(); };
+      const del = h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', onclick: () => { if (!used && a.start === 0) removeAcc(); else { U.delAcc = a.id; onChange(); } } });
       tb.append(h('tr', null,
         h('td', null, name, msg, used ? h('div', { class: 'hint', text: `${used} transaction${used > 1 ? 's' : ''}` }) : null),
         h('td', { class: 'r' }, start),
@@ -1279,6 +1280,24 @@
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Monter', text: '↑', disabled: i === 0, onclick: () => move(-1) }),
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Descendre', text: '↓', disabled: i === cfg.accounts.length - 1, onclick: () => move(1) }),
           del))));
+      if (U.delAcc === a.id) {
+        const others = cfg.accounts.filter(o => o !== a);
+        const target = h('select', { id: `acc-move-${a.id}`, 'aria-label': 'Compte de destination' }, ...others.map(o => opt(o.name)));
+        const box = h('div', { class: 'banner', style: 'margin:4px 0 8px' },
+          h('span', null, used ? `« ${a.name} » a ${used} transaction${used > 1 ? 's' : ''}${a.start ? ` et un solde de départ de ${num2.format(a.start)}` : ''}. Que veux-tu en faire ?` : `« ${a.name} » a un solde de départ de ${num2.format(a.start)}. Le supprimer quand même ?`),
+          h('div', { class: 'btnrow' },
+            used && others.length ? h('span', { class: 'btnrow' }, 'Les déplacer vers', target, h('button', { class: 'btn small', type: 'button', text: 'Déplacer et supprimer', onclick: () => {
+              const dest = cfg.accounts.find(o => o.name === target.value); if (!dest) return;
+              for (const t of S.tx) { if (t.from === a.name) t.from = dest.name; if (t.to === a.name) t.to = dest.name; }
+              S.tx = S.tx.filter(t => t.from !== t.to);
+              dest.start = r2(dest.start + a.start);
+              cfg.goals.forEach(g => { if (g.account === a.name) g.account = dest.name; });
+              removeAcc();
+            } })) : null,
+            h('button', { class: 'btn small danger', type: 'button', text: used ? `Supprimer le compte et ses ${used} transaction${used > 1 ? 's' : ''}` : 'Supprimer', onclick: () => { if (S) S.tx = S.tx.filter(t => t.from !== a.name && t.to !== a.name); removeAcc(); } }),
+            h('button', { class: 'btn small', type: 'button', text: 'Annuler', onclick: () => { U.delAcc = null; onChange(); } })));
+        tb.append(h('tr', null, h('td', { colspan: 4, style: 'border-bottom:0;padding:0' }, box)));
+      }
     });
     const add = h('input', { type: 'text', id: 'acc-add', placeholder: 'Nouveau compte (ex. LEP, PEA, Compte joint)' });
     const addMsg = h('span', { class: 'warn' });
