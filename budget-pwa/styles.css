@@ -1,28 +1,42 @@
 /* Mise en page : en-tête collant avec la période, onglets ; cartes dans une grille auto-fit, une colonne sur téléphone.
    La couleur principale (--accent-base) est définie par l'app selon les réglages. */
+/* Focale — identité : verre dépoli sur fond nuit, reflets « traitement antireflet » iris → lagon.
+   Verre = panneaux translucides floutés ; la couleur principale (--accent-base) vient des réglages. */
 :root{
-  --accent-base:#2C6A4D;
-  --bg:#F3F5F1; --panel:#FFFFFF; --sunk:#E9EDE7; --fg:#18211C; --muted:#5F6B64; --line:#D9DFD8;
+  --accent-base:#7B68F5;
+  --bg:#ECEEF4; --bg-glow-1:rgba(123,104,245,.22); --bg-glow-2:rgba(46,184,168,.18);
+  --panel:rgba(255,255,255,.62); --panel-solid:#FFFFFF; --panel-strong:rgba(255,255,255,.86);
+  --sunk:rgba(20,22,40,.06); --fg:#12131C; --muted:#646A80; --line:rgba(20,22,40,.09);
   --accent:var(--accent-base); --on-accent:#FFFFFF;
-  --ochre:#B9741F; --ochre-soft:#F4E6D2; --plum:#6D5A8E;
-  --ok:#2C7A4B; --bad:#B23F2B;
-  --f-body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  --f-num:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
-  --f-display:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
-  --r:10px;
+  --ochre:#C98316; --ochre-soft:rgba(240,180,91,.20); --plum:#13998A;
+  --ok:#14936A; --bad:#D9344C;
+  --glass-blur:saturate(170%) blur(22px);
+  --glass-edge:inset 0 1px 0 rgba(255,255,255,.75);
+  --f-body:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --f-num:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",Roboto,sans-serif;
+  --f-display:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",Roboto,sans-serif;
+  --r:22px; --r-sm:12px;
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#0F0F10; --panel:#19191B; --sunk:#232326; --fg:#ECECEE; --muted:#9D9DA5; --line:#2E2E33;
-  --accent:color-mix(in srgb,var(--accent-base) 62%,#ffffff); --on-accent:#111613;
-  --ochre:#E2A65A; --ochre-soft:#3A2D1B; --plum:#AE9AD3;
-  --ok:#72C792; --bad:#EE8670; color-scheme:dark}}
+  --bg:#07080D; --bg-glow-1:rgba(142,124,255,.20); --bg-glow-2:rgba(79,209,193,.13);
+  --panel:rgba(255,255,255,.055); --panel-solid:#14151D; --panel-strong:rgba(255,255,255,.11);
+  --sunk:rgba(255,255,255,.07); --fg:#F1F2F7; --muted:#8B90A6; --line:rgba(255,255,255,.085);
+  --accent:color-mix(in srgb,var(--accent-base) 72%,#ffffff); --on-accent:#0B0B14;
+  --ochre:#F0B45B; --ochre-soft:rgba(240,180,91,.14); --plum:#4FD1C1;
+  --ok:#5ED6A2; --bad:#FF6E7F;
+  --glass-edge:inset 0 1px 0 rgba(255,255,255,.07);
+  color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0F0F10; --panel:#19191B; --sunk:#232326; --fg:#ECECEE; --muted:#9D9DA5; --line:#2E2E33;
-  --accent:color-mix(in srgb,var(--accent-base) 62%,#ffffff); --on-accent:#111613;
-  --ochre:#E2A65A; --ochre-soft:#3A2D1B; --plum:#AE9AD3;
-  --ok:#72C792; --bad:#EE8670; color-scheme:dark}
-:root{--accent-soft:color-mix(in srgb,var(--accent) 16%,var(--panel))}
+  --bg:#07080D; --bg-glow-1:rgba(142,124,255,.20); --bg-glow-2:rgba(79,209,193,.13);
+  --panel:rgba(255,255,255,.055); --panel-solid:#14151D; --panel-strong:rgba(255,255,255,.11);
+  --sunk:rgba(255,255,255,.07); --fg:#F1F2F7; --muted:#8B90A6; --line:rgba(255,255,255,.085);
+  --accent:color-mix(in srgb,var(--accent-base) 72%,#ffffff); --on-accent:#0B0B14;
+  --ochre:#F0B45B; --ochre-soft:rgba(240,180,91,.14); --plum:#4FD1C1;
+  --ok:#5ED6A2; --bad:#FF6E7F;
+  --glass-edge:inset 0 1px 0 rgba(255,255,255,.07);
+  color-scheme:dark}
+:root{--accent-soft:color-mix(in srgb,var(--accent) 16%,transparent)}
 *{box-sizing:border-box}
 html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.45;-webkit-text-size-adjust:100%}
@@ -204,3 +218,69 @@ details.more[open]>summary::before{content:"▾ "}
 .gauge>i{position:absolute;inset:0 auto 0 0;border-radius:4px;background:var(--accent)}
 .gauge>b{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--bad)}
 @media (max-width:480px){.fields .field[style*="span 2"]{grid-column:auto!important}}
+
+/* ================================================================ Identité Focale (v1.2) */
+body{background:var(--bg);font-size:14.5px;letter-spacing:-.003em;min-height:100vh}
+body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(60vw 50vh at 8% -6%,var(--bg-glow-1),transparent 70%),radial-gradient(55vw 55vh at 100% 105%,var(--bg-glow-2),transparent 70%)}
+body::before{background:transparent;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur)}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums;letter-spacing:0}
+/* verre */
+.card,.kpi,.alert,.banner,.tip,.rec-item,.seg,nav.tabs{background:var(--panel);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:1px solid var(--line);box-shadow:var(--glass-edge)}
+.card{border-radius:var(--r);padding:20px}
+.kpi{border-radius:var(--r-sm);padding:14px 16px}
+.rec-item{border-radius:var(--r-sm);background:var(--sunk);backdrop-filter:none;-webkit-backdrop-filter:none}
+.tip{background:var(--panel-strong);border-radius:var(--r-sm);box-shadow:0 10px 30px rgba(0,0,0,.25)}
+.card h2{font-size:16px;font-weight:600;letter-spacing:-.01em}
+.note{font-size:12.5px}
+/* en-tête flottant */
+header.top{background:color-mix(in srgb,var(--bg) 55%,transparent);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--line);padding-top:14px}
+.brand{align-items:center;gap:10px}
+.brand .mark{width:30px;height:30px;flex:none}
+.brand h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:-.02em}
+nav.tabs{display:inline-flex;gap:2px;padding:3px;border-radius:999px;margin:12px 0 12px;max-width:100%}
+nav.tabs button{border:0;border-radius:999px;padding:7px 14px;color:var(--muted);font-weight:500;font-size:13.5px}
+nav.tabs button[aria-selected=true]{color:var(--fg);background:var(--panel-strong);box-shadow:0 1px 3px rgba(0,0,0,.18),var(--glass-edge)}
+/* contrôles */
+select,input[type=text],input[type=date],input[type=number],input[type=search],input[type=month]{background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:8px 11px}
+.btn{border-radius:999px;background:var(--sunk);border:1px solid var(--line);padding:7px 14px}
+.btn:hover{border-color:color-mix(in srgb,var(--fg) 25%,transparent)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,var(--plum)));border-color:transparent;color:var(--on-accent);box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 30%,transparent)}
+.btn.small{padding:4px 10px}
+.btn.ghost{background:transparent;border-color:transparent}
+.seg{border-radius:999px;padding:3px;display:inline-flex;gap:2px}
+.seg button{border-radius:999px;background:transparent;padding:6px 14px}
+.seg button[aria-pressed=true]{background:var(--panel-strong);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+/* typographie des chiffres */
+.kpi .lbl,th,.acc .h{text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:500}
+.kpi .val,.big,.pace-figs b,.hero-num{font-family:var(--f-display);font-weight:600;letter-spacing:-.025em}
+.kpi .val{font-size:26px}
+tr.group td{text-transform:none;letter-spacing:0;font-size:13px;background:transparent;border-top:1px solid var(--line)}
+td{border-bottom-color:var(--line)}
+th{border-bottom-color:var(--line)}
+.plan td:first-child,.list th{background:var(--panel-solid)}
+.plan tr.group td:first-child{background:var(--panel-solid)}
+/* héros de l'aperçu */
+.hero{margin:22px 0 14px;display:grid;gap:4px}
+.hero-label{color:var(--muted);font-size:14px}
+.hero-num{font-size:clamp(44px,8vw,72px);line-height:1;background:linear-gradient(120deg,var(--fg) 30%,color-mix(in srgb,var(--accent) 70%,var(--fg)) 70%,var(--plum));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero-num.neg{background:none;color:var(--bad)}
+.hero-text{margin:6px 0 0;color:var(--muted);font-size:15px;max-width:68ch}
+.hero-text b{color:var(--fg);font-weight:600}
+/* jauges et barres */
+.bar,.meter,.gauge,.alloc{background:var(--sunk)}
+.alloc i+i{border-left:2px solid transparent}
+.alert{border-radius:999px;padding:6px 12px}
+.banner{border-radius:var(--r-sm)}
+.chip{border-radius:999px}
+.c-fac{background:var(--sunk)}
+.swatch{border:2px solid var(--panel-solid)}
+.onb h1{font-family:var(--f-display);font-weight:600;letter-spacing:-.03em}
+.onb .wordmark{display:flex;align-items:center;gap:10px;font-family:var(--f-display);font-weight:600;font-size:18px}
+.onb .wordmark svg{width:34px;height:34px}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .card,.kpi,.alert,.banner,.tip,nav.tabs,header.top{background:var(--panel-solid)}
+}
+@media (prefers-reduced-transparency:reduce){
+  .card,.kpi,.alert,.banner,.tip,nav.tabs,header.top{background:var(--panel-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
+}

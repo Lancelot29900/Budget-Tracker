@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '1.1.1';
+  const APP_VERSION = '1.2.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -25,7 +25,9 @@
     'Épargnes': ['Épargne de précaution','Projets','Vacances','Investissements'],
     Transferts: ['Virement interne','Retrait','Dépôt']
   };
-  const ACCENTS = [['Vert','#2C6A4D'],['Bleu','#2B5C8A'],['Prune','#6D4C8E'],['Brique','#A84B2F'],['Ardoise','#46566B'],['Framboise','#A33D64']];
+  const ACCENTS = [['Iris','#7B68F5'],['Lagon','#13998A'],['Saphir','#3A6FE0'],['Ambre','#C98316'],['Corail','#E0485E'],['Graphite','#5B6275']];
+  const OLD_DEFAULT_ACCENTS = ['#2C6A4D'];
+  const MARK_SVG = `<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lensg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9D8CFF"/><stop offset=".55" stop-color="#6FA8F0"/><stop offset="1" stop-color="#4FD1C1"/></linearGradient></defs><circle cx="16" cy="16" r="12.5" fill="none" stroke="url(#lensg)" stroke-width="3.2"/><path d="M9.6 12.2a7.2 7.2 0 0 1 6.4-3.9" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="16" r="3" fill="url(#lensg)"/></svg>`;
   const COMMON_CURRENCIES = ['EUR','CHF','USD','GBP','CAD','MAD','TND','DZD','XOF','XAF'];
   const FALLBACK_CURRENCIES = ['EUR','CHF','USD','GBP','CAD','AUD','NZD','JPY','CNY','HKD','SGD','INR','BRL','MXN','ARS','CLP','COP','PEN','ZAR','MAD','TND','DZD','EGP','XOF','XAF','NGN','KES','TRY','ILS','AED','SAR','QAR','SEK','NOK','DKK','ISK','PLN','CZK','HUF','RON','BGN','RSD','UAH','RUB','THB','VND','IDR','MYR','PHP','KRW','TWD'];
   // Formats de nombres : une langue + un pays. Seuls ceux que le navigateur sait afficher sont proposés.
@@ -93,6 +95,7 @@
   function normalize(data) {
     const d = defaultCfg();
     const cfg = Object.assign({}, d, data.cfg || {});
+    if (OLD_DEFAULT_ACCENTS.includes(String(cfg.accent).toUpperCase()) || OLD_DEFAULT_ACCENTS.includes(cfg.accent)) cfg.accent = ACCENTS[0][1];
     cfg.startDay = Math.min(28, Math.max(1, parseInt(cfg.startDay, 10) || 1));
     cfg.year = parseInt(cfg.year, 10) || d.year;
     cfg.accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).filter(a => a && a.name && a.name !== 'Externe').map(a => ({ id: a.id || uid(), name: String(a.name), start: r2(a.start), savings: !!a.savings }));
@@ -132,8 +135,8 @@
     const root = document.documentElement;
     if (cfg.theme === 'light' || cfg.theme === 'dark') root.setAttribute('data-theme', cfg.theme); else root.removeAttribute('data-theme');
     root.style.setProperty('--accent-base', /^#[0-9a-f]{6}$/i.test(cfg.accent) ? cfg.accent : ACCENTS[0][1]);
-    document.title = cfg.appName || 'Budget';
-    $('appName').textContent = cfg.appName || 'Budget';
+    document.title = cfg.appName || 'Focale';
+    $('appName').textContent = cfg.appName || 'Focale';
     try {
       fmt = new Intl.NumberFormat(cfg.locale, { style: 'currency', currency: cfg.currency });
       fmt0 = new Intl.NumberFormat(cfg.locale, { style: 'currency', currency: cfg.currency, maximumFractionDigits: 0 });
@@ -354,15 +357,15 @@
     const rate = t.Revenus ? netSave / t.Revenus : 0;
     const overD = r2(t['Dépenses'] - pD);
     const lede = $('lede'); lede.replaceChildren();
-    if (U.period !== 'year' && S.cfg.startDay > 1) {
-      const [a, z] = monthRange(U.year, +U.period);
-      lede.append(h('span', { class: 'mut', text: `Du ${dfmt(a)} au ${dfmt(z)}. ` }));
-    }
+    lede.className = 'hero';
     if (!S.tx.length) {
-      lede.append('Ton budget est prêt. Ajoute ta première transaction avec « + Transaction », puis remplis ton prévisionnel pour comparer prévu et réel.');
+      lede.append(h('div', { class: 'hero-label', text: 'Bienvenue' }), h('p', { class: 'hero-text', text: 'Ton budget est prêt. Ajoute ta première transaction avec « + Transaction », puis remplis ton prévisionnel pour comparer prévu et réel.' }));
     } else {
-      lede.append(`Sur ${periodLabel()} : `, h('b', { text: money(reste) }), ` de reste après factures et dépenses, et `, h('b', { text: pct.format(rate) }), ` de tes revenus mis de côté. `);
-      if (pD > 0) lede.append(overD > 0 ? `Tes dépenses dépassent le prévu de ${money(overD)}.` : `Tes dépenses restent ${money(-overD)} sous le prévu.`);
+      let range = '';
+      if (U.period !== 'year' && S.cfg.startDay > 1) { const [a, z] = monthRange(U.year, +U.period); range = ` (du ${dfmt(a)} au ${dfmt(z)})`; }
+      const txt = h('p', { class: 'hero-text' }, h('b', { text: pct.format(rate) }), ` de tes revenus mis de côté. `);
+      if (pD > 0) txt.append(overD > 0 ? `Tes dépenses dépassent le prévu de ${money(overD)}.` : `Tes dépenses restent ${money(-overD)} sous le prévu.`);
+      lede.append(h('div', { class: 'hero-label', text: `Il te reste, sur ${periodLabel()}${range}` }), h('div', { class: 'hero-num' + (reste < 0 ? ' neg' : ''), text: money(reste) }), txt);
     }
     // alertes
     const alerts = $('alerts'); alerts.replaceChildren();
@@ -390,9 +393,9 @@
       kpi('Revenus', money(t.Revenus), `prévu ${money(pRev)}`, delta(t.Revenus, pb.Revenus, true)),
       kpi('Factures', money(t.Factures), `prévu ${money(pF)}`, delta(t.Factures, pb.Factures, false)),
       kpi('Dépenses', money(t['Dépenses']), `prévu ${money(pD)}`, delta(t['Dépenses'], pb['Dépenses'], false), overD > 0.004 && pD > 0 ? 'neg' : ''),
-      kpi('Épargne nette', money(netSave), `épargné ${money(t['Épargnes'])} · repris ${money(t.reprises)} · prévu ${money(pE)}`, delta(netSave, r2(pb['Épargnes'] - pb.reprises), true)),
-      kpi('Reste', money(reste), 'revenus − factures − dépenses', delta(reste, pReste, true), reste < 0 ? 'neg' : '')
+      kpi('Épargne nette', money(netSave), `prévu ${money(pE)}, dont ${money(t.reprises)} repris`, delta(netSave, r2(pb['Épargnes'] - pb.reprises), true))
     );
+    if (hasPrev) { const d = delta(reste, pReste, true); if (d) lede.querySelector('.hero-num')?.after(d); }
     renderPace(t['Dépenses'], pD);
     renderAlloc(t, netSave);
     // comptes
@@ -554,7 +557,7 @@
   function measure(svg, texts) {
     let w = 0; for (const tx of texts) { const t = s('text'); t.textContent = tx; svg.append(t); w = Math.max(w, t.getComputedTextLength()); t.remove(); } return w;
   }
-  function niceStep(max) { const raw = max / 4; const p = Math.pow(10, Math.floor(Math.log10(raw || 1))); const n = raw / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
+  function niceStep(max) { const raw = max / 5; const p = Math.pow(10, Math.floor(Math.log10(raw || 1))); const n = raw / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
 
   function drawMonths() {
     const box = $('ch-months'); const W = box.clientWidth; if (!W) return;
@@ -1534,7 +1537,8 @@
     let body;
     if (U.onbStep === 0) {
       body = h('div', { style: 'display:grid;gap:12px' },
-        h('h1', { text: 'Ton budget, sur ton appareil.' }),
+        (() => { const w = h('div', { class: 'wordmark' }); w.innerHTML = MARK_SVG.replace(/lensg/g, 'lensg2'); w.append('Focale'); return w; })(),
+        h('h1', { text: 'Ton budget, net et précis.' }),
         h('p', { class: 'lede', style: 'margin:0', text: 'Suis tes comptes, tes transactions, ton prévisionnel, ton épargne et tes crédits. Tout fonctionne hors ligne et tes données ne quittent jamais cet appareil.' }),
         h('div', { class: 'card' }, h('h2', { text: 'Pour commencer' }), h('p', { class: 'note', text: 'Tout reste modifiable plus tard dans Réglages.' }), generalFields(d, re)),
         h('div', { class: 'card' }, h('h2', { text: 'Déjà une sauvegarde, ou envie de voir avant ?' }),
