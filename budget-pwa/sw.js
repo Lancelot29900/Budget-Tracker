@@ -1,11 +1,11 @@
 // Cache de l'app pour un fonctionnement hors ligne.
 // Change VERSION à chaque mise à jour des fichiers pour que les appareils récupèrent la nouvelle version.
-const VERSION = 'budget-v1.1.0';
+const VERSION = 'budget-v1.1.1';
 const FILES = [
   './',
   'index.html',
-  'styles.css',
-  'app.js',
+  'styles.css?v=1.1.1',
+  'app.js?v=1.1.1',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
@@ -31,7 +31,8 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req)
+    // no-cache : on revalide toujours auprès du serveur, pour ne jamais mélanger deux versions
+    fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then((res) => {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(req, copy));

@@ -42,7 +42,7 @@ Va sur app.netlify.com/drop et glisse le dossier entier. Tu obtiens une adresse 
 
 ## Publier une mise à jour
 
-Après avoir modifié un fichier, change la valeur `VERSION` en haut de `sw.js` (par exemple `budget-v1.0.1`) puis remets les fichiers en ligne. Les appareils récupèrent la nouvelle version à l'ouverture suivante.
+Après avoir modifié un fichier, change le numéro de version partout où il apparaît : `VERSION` et les `?v=` dans `sw.js`, les `?v=` de `styles.css` et `app.js` dans `index.html`, et `APP_VERSION` dans `app.js`. Remets ensuite les fichiers modifiés en ligne (les fichiers eux-mêmes, pas le zip). Les appareils récupèrent la nouvelle version à l'ouverture suivante ; le numéro s'affiche dans Réglages.
 
 ## Partager l'app
 

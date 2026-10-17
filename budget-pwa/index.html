@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=1.1.1">
 </head>
 <body>
 <div class="wrap">
@@ -163,7 +163,7 @@
 </div>
 <input type="file" id="fileJson" accept="application/json,.json" hidden>
 <input type="file" id="fileCsv" accept=".csv,text/csv,text/plain" hidden>
-<script src="app.js"></script>
+<script src="app.js?v=1.1.1"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

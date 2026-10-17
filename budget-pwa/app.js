@@ -5,6 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
+  const APP_VERSION = '1.1.1';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -1403,7 +1404,7 @@
       sec('set-cats', 'Catégories', 'Renommer une catégorie met à jour ses transactions et ton prévisionnel. Une catégorie utilisée ne peut pas être supprimée.', categoriesEditor(S.cfg, on, true)),
       sec('set-goals', 'Objectifs d’épargne', null, goalsEditor(S.cfg, on)),
       sec('set-loans', 'Crédits & dettes', null, loansEditor(S.cfg, on)),
-      sec('set-install', 'Installer sur cet appareil', 'L’app fonctionne hors ligne une fois installée.', install),
+      sec('set-install', 'Installer sur cet appareil', `L’app fonctionne hors ligne une fois installée. Version ${APP_VERSION}.`, install),
       sec('set-data', 'Données & sauvegardes', null, data)));
     if (U.settingsFocus) { const el = $(U.settingsFocus === 'goals' ? 'set-goals' : 'set-loans'); U.settingsFocus = null; setTimeout(() => el?.scrollIntoView({ behavior: 'smooth' }), 30); }
   }
