@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '1.2.2';
+  const APP_VERSION = '1.3.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -98,7 +98,7 @@
     if (OLD_DEFAULT_ACCENTS.includes(String(cfg.accent).toUpperCase()) || OLD_DEFAULT_ACCENTS.includes(cfg.accent)) cfg.accent = ACCENTS[0][1];
     cfg.startDay = Math.min(28, Math.max(1, parseInt(cfg.startDay, 10) || 1));
     cfg.year = parseInt(cfg.year, 10) || d.year;
-    cfg.accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).filter(a => a && a.name && a.name !== 'Externe').map(a => ({ id: a.id || uid(), name: String(a.name), start: r2(a.start), savings: !!a.savings }));
+    cfg.accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).filter(a => a && a.name && a.name !== 'Externe').map(a => ({ id: a.id || uid(), name: String(a.name), start: r2(a.start), savings: !!a.savings, current: a.savings ? false : (a.current === undefined ? true : !!a.current) }));
     const cats = {};
     for (const g of CAT_GROUPS) cats[g] = Array.isArray(cfg.categories?.[g]) ? [...new Set(cfg.categories[g].map(String).filter(Boolean))] : clone(DEFAULT_CATS[g]);
     cfg.categories = cats;
@@ -349,24 +349,74 @@
     }
     return out.sort((a, z) => z.over - a.over);
   }
+  /** Ce qui reste encore à passer ce mois-ci, d'après le prévisionnel (catégorie par catégorie, jamais négatif). */
+  function remainingThisMonth() {
+    const tb = bm(todayStr()), p = String(tb.m), y = tb.y, b = budget(p, y);
+    const rest = (g, onlyIfNone) => r2(S.cfg.categories[g].reduce((a, c) => {
+      const pl = planned(g, c, p, y), re = b[g][c] || 0;
+      if (onlyIfNone) return a + (re > 0 ? 0 : pl);
+      return a + Math.max(0, pl - re);
+    }, 0));
+    return {
+      y, m: tb.m,
+      income: rest('Revenus', true),            // revenus prévus pas encore arrivés du tout
+      bills: rest('Factures'),                  // factures encore à prélever
+      savings: rest('Épargnes'),               // virements d'épargne encore prévus
+      spend: Math.max(0, r2(plannedTotal('Dépenses', p, y) - b.tot['Dépenses'])) // budget dépenses variables restant
+    };
+  }
+  function renderCashHero(box) {
+    const { real, fut } = balances();
+    const cur = S.cfg.accounts.filter(a => a.current);
+    const list = cur.length ? cur : S.cfg.accounts.filter(a => !a.savings);
+    const totReal = r2(list.reduce((s, a) => s + real[a.name], 0));
+    const totFut = r2(list.reduce((s, a) => s + fut[a.name], 0));
+    const now = new Date();
+    box.append(h('div', { class: 'hero-label', text: `Disponible sur tes comptes courants, le ${now.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}` }),
+      h('div', { class: 'hero-num' + (totReal < 0 ? ' neg' : ''), text: money(totReal) }));
+    // un chip par compte courant
+    const chips = h('div', { class: 'acc-chips' });
+    for (const a of list) {
+      const r = real[a.name], f = fut[a.name], pending = r2(f - r);
+      chips.append(h('div', { class: 'acc-chip' + (f < 0 ? ' low' : '') },
+        h('span', { class: 'acc-name', text: a.name }),
+        h('span', { class: 'acc-val num' + (r < 0 ? ' neg' : ''), text: money(r) }),
+        h('span', { class: 'acc-sub', text: Math.abs(pending) >= 0.005 ? `${money(f)} après ${pending < 0 ? 'les débits' : 'les opérations'} en attente (${sgn(pending)})` : 'rien en attente' })));
+    }
+    box.append(chips);
+    // reste à vivre jusqu'à la fin du mois en cours
+    const rm = remainingThisMonth();
+    const [, end] = monthRange(rm.y, rm.m); end.setHours(23, 59, 59);
+    const daysLeft = Math.max(1, Math.ceil((end - now) / 864e5));
+    const live = r2(totFut + rm.income - rm.bills - rm.savings);
+    const txt = h('p', { class: 'hero-text' });
+    const parts = [];
+    if (rm.bills) parts.push(`${money(rm.bills)} de factures`);
+    if (rm.savings) parts.push(`${money(rm.savings)} d’épargne`);
+    if (rm.income) parts.push(`+${money(rm.income)} de revenus attendus`);
+    const after = parts.length ? `En comptant ce qui doit encore passer ce mois-ci (${parts.join(', ')}), ` : 'Une fois les opérations en attente passées, ';
+    const deMois = (m) => (/^[aeiouy]/i.test(MONTHS[m - 1]) ? 'd’' : 'de ') + MONTHS[m - 1].toLowerCase();
+    if (live >= 0) {
+      txt.append(after, 'il te restera ', h('b', { text: money(live) }), ` pour finir ${MONTHS[rm.m - 1].toLowerCase()}, soit `, h('b', { text: `${money(live / daysLeft)} par jour` }), ` sur ${daysLeft} jour${daysLeft > 1 ? 's' : ''}.`);
+      if (rm.spend > live + 0.5) txt.append(` C’est ${money(r2(rm.spend - live))} de moins que ton budget dépenses restant (${money(rm.spend)}).`);
+    } else {
+      txt.append(after, 'il te manquera ', h('b', { class: 'neg', text: money(-live) }), ` sur tes comptes courants d’ici la fin ${deMois(rm.m)}. Pense à décaler un virement d’épargne ou à puiser dans une réserve.`);
+    }
+    box.append(txt);
+  }
+
   function renderApercu() {
     const b = budget(), t = b.tot;
     const pRev = plannedTotal('Revenus'), pF = plannedTotal('Factures'), pD = plannedTotal('Dépenses'), pE = plannedTotal('Épargnes');
-    const reste = r2(t.Revenus - t.Factures - t['Dépenses']);
     const netSave = r2(t['Épargnes'] - t.reprises);
+    const reste = r2(t.Revenus - t.Factures - t['Dépenses'] - netSave);
     const rate = t.Revenus ? netSave / t.Revenus : 0;
     const overD = r2(t['Dépenses'] - pD);
     const lede = $('lede'); lede.replaceChildren();
     lede.className = 'hero';
     if (!S.tx.length) {
       lede.append(h('div', { class: 'hero-label', text: 'Bienvenue' }), h('p', { class: 'hero-text', text: 'Ton budget est prêt. Ajoute ta première transaction avec « + Transaction », puis remplis ton prévisionnel pour comparer prévu et réel.' }));
-    } else {
-      let range = '';
-      if (U.period !== 'year' && S.cfg.startDay > 1) { const [a, z] = monthRange(U.year, +U.period); range = ` (du ${dfmt(a)} au ${dfmt(z)})`; }
-      const txt = h('p', { class: 'hero-text' }, h('b', { text: pct.format(rate) }), ` de tes revenus mis de côté. `);
-      if (pD > 0) txt.append(overD > 0 ? `Tes dépenses dépassent le prévu de ${money(overD)}.` : `Tes dépenses restent ${money(-overD)} sous le prévu.`);
-      lede.append(h('div', { class: 'hero-label', text: `Il te reste, sur ${periodLabel()}${range}` }), h('div', { class: 'hero-num' + (reste < 0 ? ' neg' : ''), text: money(reste) }), txt);
-    }
+    } else renderCashHero(lede);
     // alertes
     const alerts = $('alerts'); alerts.replaceChildren();
     const alert = (cls, text, btnLabel, fn) => h('span', { class: 'alert ' + cls }, h('i'), text, btnLabel ? h('button', { type: 'button', text: btnLabel, onclick: fn }) : null);
@@ -381,7 +431,7 @@
     if (over.length > 3) alerts.append(alert('bad', `et ${over.length - 3} autre${over.length - 3 > 1 ? 's' : ''} catégorie${over.length - 3 > 1 ? 's' : ''} dépassée${over.length - 3 > 1 ? 's' : ''}`));
     // KPI avec variation
     const pp = prevPeriod(), pb = budget(pp.p, pp.y).tot, hasPrev = S.tx.some(x => inPeriod(x, pp.p, pp.y));
-    const pReste = r2(pb.Revenus - pb.Factures - pb['Dépenses']);
+    const pReste = r2(pb.Revenus - pb.Factures - pb['Dépenses'] - (pb['Épargnes'] - pb.reprises));
     const delta = (cur, prev, upGood) => {
       if (!hasPrev) return null;
       const d = r2(cur - prev); if (Math.abs(d) < 0.005) return h('span', { class: 'delta mut', text: `= vs ${pp.label}` });
@@ -393,9 +443,9 @@
       kpi('Revenus', money(t.Revenus), `prévu ${money(pRev)}`, delta(t.Revenus, pb.Revenus, true)),
       kpi('Factures', money(t.Factures), `prévu ${money(pF)}`, delta(t.Factures, pb.Factures, false)),
       kpi('Dépenses', money(t['Dépenses']), `prévu ${money(pD)}`, delta(t['Dépenses'], pb['Dépenses'], false), overD > 0.004 && pD > 0 ? 'neg' : ''),
-      kpi('Épargne nette', money(netSave), `prévu ${money(pE)}, dont ${money(t.reprises)} repris`, delta(netSave, r2(pb['Épargnes'] - pb.reprises), true))
+      kpi('Épargne nette', money(netSave), `prévu ${money(pE)}, dont ${money(t.reprises)} repris`, delta(netSave, r2(pb['Épargnes'] - pb.reprises), true)),
+      kpi('Solde du mois', money(reste), 'revenus − factures − dépenses − épargne', delta(reste, pReste, true), reste < 0 ? 'neg' : '')
     );
-    if (hasPrev) { const d = delta(reste, pReste, true); if (d) lede.querySelector('.hero-num')?.after(d); }
     renderPace(t['Dépenses'], pD);
     renderAlloc(t, netSave);
     // comptes
@@ -403,7 +453,7 @@
     const acc = h('div', { class: 'acc' }, h('span', { class: 'h', text: 'Compte' }), h('span', { class: 'h', style: 'text-align:right', text: 'Réel' }), h('span', { class: 'h', style: 'text-align:right', text: 'À venir' }));
     const row = (name, a, f, cls) => [h('span', { class: cls || '', text: name }), h('span', { class: 'num ' + (cls || '') + (a < 0 ? ' neg' : ''), style: 'text-align:right', text: money(a) }), h('span', { class: 'num mut ' + (cls || ''), style: 'text-align:right', text: money(f) })];
     let tr = 0, tf = 0;
-    for (const [label, list] of [['Comptes courants', S.cfg.accounts.filter(a => !a.savings)], ['Épargne', S.cfg.accounts.filter(a => a.savings)]]) {
+    for (const [label, list] of [['Comptes courants', S.cfg.accounts.filter(a => a.current)], ['Épargne', S.cfg.accounts.filter(a => a.savings)], ['Autres comptes', S.cfg.accounts.filter(a => !a.current && !a.savings)]]) {
       if (!list.length) continue;
       acc.append(h('span', { class: 'sec', text: label }));
       for (const a of list) { acc.append(...row(a.name, real[a.name], fut[a.name])); tr += real[a.name]; tf += fut[a.name]; }
@@ -1268,13 +1318,16 @@
       const start = h('input', { type: 'text', inputmode: 'decimal', class: 'n', id: `acc-start-${a.id}`, value: num2.format(a.start), 'aria-label': 'Solde de départ' });
       start.addEventListener('change', () => { const n = parseNum(start.value); if (Number.isFinite(n)) { a.start = r2(n); onChange(); } else start.value = num2.format(a.start); });
       const sav = h('input', { type: 'checkbox', id: `acc-sav-${a.id}`, checked: a.savings, 'aria-label': 'Compte épargne' });
-      sav.addEventListener('change', () => { a.savings = sav.checked; onChange(); });
+      sav.addEventListener('change', () => { a.savings = sav.checked; if (a.savings) a.current = false; onChange(); });
+      const curr = h('input', { type: 'checkbox', id: `acc-cur-${a.id}`, checked: a.current, 'aria-label': 'Compte courant' });
+      curr.addEventListener('change', () => { a.current = curr.checked; if (a.current) a.savings = false; onChange(); });
       const move = (d) => { const j = i + d; if (j < 0 || j >= cfg.accounts.length) return; [cfg.accounts[i], cfg.accounts[j]] = [cfg.accounts[j], cfg.accounts[i]]; onChange(); };
       const removeAcc = () => { cfg.accounts.splice(i, 1); cfg.goals.forEach(g => { if (g.account === a.name) g.account = ''; }); U.delAcc = null; onChange(); };
       const del = h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', onclick: () => { if (!used && a.start === 0) removeAcc(); else { U.delAcc = a.id; onChange(); } } });
       tb.append(h('tr', null,
         h('td', null, name, msg, used ? h('div', { class: 'hint', text: `${used} transaction${used > 1 ? 's' : ''}` }) : null),
         h('td', { class: 'r' }, start),
+        h('td', { style: 'text-align:center' }, curr),
         h('td', { style: 'text-align:center' }, sav),
         h('td', null, h('div', { class: 'acts' },
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Monter', text: '↑', disabled: i === 0, onclick: () => move(-1) }),
@@ -1296,17 +1349,17 @@
             } })) : null,
             h('button', { class: 'btn small danger', type: 'button', text: used ? `Supprimer le compte et ses ${used} transaction${used > 1 ? 's' : ''}` : 'Supprimer', onclick: () => { if (S) S.tx = S.tx.filter(t => t.from !== a.name && t.to !== a.name); removeAcc(); } }),
             h('button', { class: 'btn small', type: 'button', text: 'Annuler', onclick: () => { U.delAcc = null; onChange(); } })));
-        tb.append(h('tr', null, h('td', { colspan: 4, style: 'border-bottom:0;padding:0' }, box)));
+        tb.append(h('tr', null, h('td', { colspan: 5, style: 'border-bottom:0;padding:0' }, box)));
       }
     });
     const add = h('input', { type: 'text', id: 'acc-add', placeholder: 'Nouveau compte (ex. LEP, PEA, Compte joint)' });
     const addMsg = h('span', { class: 'warn' });
-    const doAdd = () => { const v = add.value.trim(); if (!v) return; if (v === 'Externe' || cfg.accounts.some(a => a.name === v)) { addMsg.textContent = 'Ce nom existe déjà.'; return; } cfg.accounts.push({ id: uid(), name: v, start: 0, savings: /livret|lep|pel|cel|pea|assurance|épargne|epargne|cto|bourse/i.test(v) }); add.value = ''; onChange(); setTimeout(() => $('acc-add')?.focus(), 10); };
+    const doAdd = () => { const v = add.value.trim(); if (!v) return; if (v === 'Externe' || cfg.accounts.some(a => a.name === v)) { addMsg.textContent = 'Ce nom existe déjà.'; return; } { const sv = /livret|lep|pel|cel|pea|assurance|épargne|epargne|cto|bourse/i.test(v); cfg.accounts.push({ id: uid(), name: v, start: 0, savings: sv, current: !sv }); } add.value = ''; onChange(); setTimeout(() => $('acc-add')?.focus(), 10); };
     add.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
     return h('div', null,
-      h('div', { class: 'scroll' }, h('table', { class: 'edit-table' }, h('thead', null, h('tr', null, h('th', { text: 'Compte' }), h('th', { class: 'r', text: 'Solde de départ' }), h('th', { style: 'text-align:center', text: 'Épargne' }), h('th'))), tb)),
+      h('div', { class: 'scroll' }, h('table', { class: 'edit-table' }, h('thead', null, h('tr', null, h('th', { text: 'Compte' }), h('th', { class: 'r', text: 'Solde de départ' }), h('th', { style: 'text-align:center', text: 'Courant' }), h('th', { style: 'text-align:center', text: 'Épargne' }), h('th'))), tb)),
       h('div', { class: 'addrow' }, add, h('button', { class: 'btn', type: 'button', text: 'Ajouter', onclick: doAdd })), addMsg,
-      h('p', { class: 'hint', text: 'Le solde de départ est celui du compte avant la première transaction saisie. Coche « Épargne » pour les livrets, assurance-vie, PEA… ' }));
+      h('p', { class: 'hint', text: 'Le solde de départ est celui du compte avant la première transaction saisie. Coche « Courant » pour les comptes du quotidien (ils forment le disponible en haut de l’Aperçu) et « Épargne » pour les livrets, assurance-vie, PEA… Un compte peut n’être ni l’un ni l’autre (compte commun, carte titres-restaurant…).' }));
   }
 
   function categoriesEditor(cfg, onChange, withData) {
