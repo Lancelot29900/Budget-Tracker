@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '1.3.0';
+  const APP_VERSION = '1.4.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -114,7 +114,7 @@
     cfg.autoRecurring = !!cfg.autoRecurring;
     const tx = (Array.isArray(data.tx) ? data.tx : []).filter(t => t && /^\d{4}-\d{2}-\d{2}$/.test(t.date) && +t.amount > 0).map(t => ({
       id: t.id || uid(), date: t.date, amount: r2(t.amount), type: TYPES.includes(t.type) ? t.type : 'Dépenses',
-      category: String(t.category || ''), from: String(t.from || 'Externe'), to: String(t.to || 'Externe'), description: String(t.description || ''), pointed: t.pointed !== false, ...(t.recurId ? { recurId: String(t.recurId) } : {})
+      category: String(t.category || ''), from: String(t.from || 'Externe'), to: String(t.to || 'Externe'), description: String(t.description || ''), pointed: t.pointed !== false, ...(t.recurId ? { recurId: String(t.recurId) } : {}), ...(t.toSort ? { toSort: true } : {})
     }));
     return { version: 1, cfg, tx };
   }
@@ -322,7 +322,7 @@
     document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === U.tab)));
     for (const t of TABS) $('p-' + t).hidden = t !== U.tab;
     if (U.tab === 'apercu') renderApercu();
-    if (U.tab === 'transactions') { refreshFormOptions(); renderRecurring(); renderList(); }
+    if (U.tab === 'transactions') { refreshFormOptions(); renderExpress(); renderToSort(); renderRecurring(); renderList(); }
     if (U.tab === 'credits') renderCredits();
     if (U.tab === 'previsionnel') renderPlan();
     if (U.tab === 'epargne') renderEpargne();
@@ -424,6 +424,8 @@
       const st = recurStatus(U.year, +U.period).filter(x => !x.done);
       if (st.length) alerts.append(alert('info', `${st.length} opération${st.length > 1 ? 's' : ''} récurrente${st.length > 1 ? 's' : ''} à reporter`, 'Reporter', () => { postRecurring(st, U.year, +U.period); commit(); }));
     }
+    const nSort = S.tx.filter(x => x.toSort).length;
+    if (nSort) alerts.append(alert('info', `${nSort} opération${nSort > 1 ? 's' : ''} à classer`, 'Classer', () => showTab('transactions')));
     const unp = S.tx.filter(x => !x.pointed && inPeriod(x)).length;
     if (unp) alerts.append(alert('', `${unp} transaction${unp > 1 ? 's' : ''} non pointée${unp > 1 ? 's' : ''}`, 'Voir', () => { $('fp').value = '0'; showTab('transactions'); }));
     const over = overCategories(b);
@@ -960,6 +962,166 @@
     const tb = bm(todayStr());
     const n = postRecurring(recurStatus(tb.y, tb.m), tb.y, tb.m);
     if (n) { U.msg.recur = `${n} opération${n > 1 ? 's' : ''} récurrente${n > 1 ? 's' : ''} reportée${n > 1 ? 's' : ''} automatiquement pour ${monthName(tb.y, tb.m)}.`; save(); }
+  }
+
+  // ---------------------------------------------------------------- saisie express & « à classer »
+  const TO_SORT = 'À classer';
+  const normTxt = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const capFirst = (x) => x ? x.charAt(0).toUpperCase() + x.slice(1) : x;
+  /** Compte d'où partent le plus souvent les dépenses (90 derniers jours). */
+  function usualSpendAccount() {
+    const lim = isoOf(new Date(Date.now() - 90 * 864e5)), n = {};
+    for (const t of S.tx) if (t.type === 'Dépenses' && t.date >= lim && t.from !== 'Externe') n[t.from] = (n[t.from] || 0) + 1;
+    const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0];
+    return best && accNames().includes(best[0]) ? best[0] : mainAcc();
+  }
+  /** Lit une ligne comme « 12,50 feuillette », « Leclerc 45 € hier », « +70 covoit 12/10 ». */
+  function parseExpress(line) {
+    let s = String(line || '').replace(/[€$£]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!s) return null;
+    let date = todayStr();
+    const lower = normTxt(s);
+    if (/\bavant hier\b/.test(lower)) { date = isoOf(new Date(Date.now() - 2 * 864e5)); s = s.replace(/avant[- ]hier/i, ' '); }
+    else if (/\bhier\b/.test(lower)) { date = isoOf(new Date(Date.now() - 864e5)); s = s.replace(/hier/i, ' '); }
+    const dm = s.match(/(^|\s)(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?=\s|$)/);
+    if (dm) { const y = dm[4] ? (dm[4].length === 2 ? '20' + dm[4] : dm[4]) : String(new Date().getFullYear()); date = `${y}-${pad2(dm[3])}-${pad2(dm[2])}`; s = s.replace(dm[0], ' '); }
+    const income = /^\s*\+/.test(s);
+    const m = s.match(/[+-]?\d{1,3}(?:[   ]\d{3})+(?:[.,]\d{1,2})?|[+-]?\d+(?:[.,]\d{1,2})?/);
+    if (!m) return null;
+    const amount = r2(Math.abs(parseNum(m[0])));
+    if (!(amount > 0)) return null;
+    const label = s.replace(m[0], ' ').replace(/\s+/g, ' ').trim();
+    return { amount, label, date, income };
+  }
+  /** Devine type, catégorie et comptes à partir de l'historique. */
+  function guessFromHistory(label, income) {
+    const L = normTxt(label);
+    const pool = S.tx.filter(t => !t.toSort && (income ? ['Revenus', 'Remboursement'].includes(t.type) : ['Dépenses', 'Factures'].includes(t.type))).sort((a, b) => b.date.localeCompare(a.date));
+    if (L) {
+      let hit = pool.find(t => normTxt(t.description) === L)
+        || pool.find(t => normTxt(t.category) === L)
+        || (L.length >= 3 && pool.find(t => { const d = normTxt(t.description); return d && (d.startsWith(L) || L.startsWith(d) || d.split(' ').includes(L)); }))
+        || (L.length >= 3 && pool.find(t => normTxt(t.category).split(' ').some(w => w.length >= 4 && L.includes(w))));
+      if (hit) return { type: hit.type, category: hit.category, from: hit.from, to: hit.to, description: normTxt(hit.description) === L ? hit.description : capFirst(label) };
+      // nom de catégorie tapé sans historique
+      const grp = income ? 'Revenus' : 'Dépenses';
+      const cat = S.cfg.categories[grp].find(c => normTxt(c) === L) || (!income && S.cfg.categories.Factures.find(c => normTxt(c) === L));
+      if (cat) {
+        const type = income ? 'Revenus' : (S.cfg.categories['Dépenses'].includes(cat) ? 'Dépenses' : 'Factures');
+        return income ? { type, category: cat, from: 'Externe', to: mainAcc(), description: '' } : { type, category: cat, from: type === 'Dépenses' ? usualSpendAccount() : mainAcc(), to: 'Externe', description: '' };
+      }
+    }
+    return null;
+  }
+  function expressToTx(p) {
+    const g = guessFromHistory(p.label, p.income);
+    if (g) return { id: uid(), date: p.date, amount: p.amount, ...g, description: g.description || capFirst(p.label), pointed: true };
+    return { id: uid(), date: p.date, amount: p.amount, type: p.income ? 'Revenus' : 'Dépenses', category: TO_SORT, from: p.income ? 'Externe' : usualSpendAccount(), to: p.income ? mainAcc() : 'Externe', description: capFirst(p.label), pointed: true, toSort: true };
+  }
+  /** Ajoute une ou plusieurs lignes ; renvoie les transactions créées. */
+  function addExpressLines(text) {
+    const created = [];
+    for (const line of String(text || '').split(/\r?\n|;/)) {
+      const p = parseExpress(line); if (!p) continue;
+      const tx = expressToTx(p); S.tx.push(tx); created.push(tx);
+    }
+    if (created.length) commit();
+    return created;
+  }
+  let toastTimer = null;
+  function toast(text, undo) {
+    const el = $('toast'); if (!el) return;
+    el.replaceChildren(...[h('span', { text }), undo ? h('button', { type: 'button', text: 'Annuler', onclick: () => { undo(); el.hidden = true; } }) : null].filter(Boolean));
+    el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 6000);
+  }
+  function announce(created) {
+    if (!created.length) return;
+    const ids = created.map(t => t.id);
+    const undo = () => { S.tx = S.tx.filter(t => !ids.includes(t.id)); commit(); };
+    const sorted = created.filter(t => t.toSort).length;
+    if (created.length === 1) { const t = created[0]; toast(t.toSort ? `${money(t.amount)} ajoutée dans « À classer »` : `Ajoutée : ${money(t.amount)} · ${t.category} · ${t.from === 'Externe' ? t.to : t.from}`, undo); }
+    else toast(`${created.length} opérations ajoutées${sorted ? `, dont ${sorted} à classer` : ''}`, undo);
+  }
+  /** Favoris : les petites dépenses que tu refais souvent (120 derniers jours). */
+  function frequentExpenses() {
+    const lim = isoOf(new Date(Date.now() - 120 * 864e5)), m = new Map();
+    for (const t of S.tx) {
+      if (t.type !== 'Dépenses' || t.toSort || !t.description || t.date < lim || t.recurId) continue;
+      const k = normTxt(t.description) + '|' + t.amount;
+      const o = m.get(k) || { n: 0, t }; o.n++; if (t.date > o.t.date) o.t = t; m.set(k, o);
+    }
+    return [...m.values()].filter(o => o.n >= 2).sort((a, b) => b.n - a.n).slice(0, 8).map(o => o.t);
+  }
+  function renderExpress() {
+    const box = $('c-express');
+    if (box.contains(document.activeElement) && document.activeElement.id === 'ex-in') { updateExpressPreview(); return; }
+    const inp = h('input', { type: 'text', id: 'ex-in', placeholder: 'ex. 9,50 feuillette · 45 essence hier · +70 covoit', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Saisie express' });
+    const prev = h('div', { class: 'ex-preview', id: 'ex-prev' });
+    inp.addEventListener('input', updateExpressPreview);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const c = addExpressLines(inp.value); if (c.length) { inp.value = ''; announce(c); updateExpressPreview(); } } });
+    inp.addEventListener('paste', (e) => {
+      const txt = e.clipboardData?.getData('text') || '';
+      if (/\r?\n/.test(txt.trim())) { e.preventDefault(); const c = addExpressLines(txt); announce(c); }
+    });
+    const paste = h('button', { class: 'btn', type: 'button', text: 'Coller', title: 'Ajouter ce qui est dans le presse-papiers', onclick: async () => {
+      try { const txt = await navigator.clipboard.readText(); const c = addExpressLines(txt); if (c.length) announce(c); else toast('Rien de lisible dans le presse-papiers : il faut au moins un montant.'); }
+      catch (e) { toast('Accès au presse-papiers refusé : colle directement dans le champ (Cmd+V).'); }
+    } });
+    const add = h('button', { class: 'btn primary', type: 'button', text: 'Ajouter', onclick: () => { const c = addExpressLines(inp.value); if (c.length) { inp.value = ''; announce(c); updateExpressPreview(); inp.focus(); } else toast('Indique au moins un montant, par exemple « 12,50 courses ».'); } });
+    const fav = frequentExpenses();
+    box.replaceChildren(...[
+      h('div', { class: 'rec-head' }, h('div', null, h('h2', { text: 'Saisie express' }), h('p', { class: 'note', style: 'margin-bottom:0', text: 'Un montant et un mot suffisent : l’app reprend la catégorie et le compte de tes saisies passées. Ce qu’elle ne reconnaît pas part dans « À classer ».' }))),
+      h('div', { class: 'ex-row' }, inp, paste, add), prev,
+      fav.length ? h('div', { class: 'ex-favs' }, h('span', { class: 'hint', text: 'En un tap :' }), ...fav.map(t => h('button', { class: 'chip-btn', type: 'button', onclick: () => {
+        const tx = { id: uid(), date: todayStr(), amount: t.amount, type: t.type, category: t.category, from: t.from, to: t.to, description: t.description, pointed: true };
+        S.tx.push(tx); commit(); announce([tx]);
+      } }, t.description, h('span', { class: 'num', text: ' ' + money(t.amount) })))) : null].filter(Boolean));
+    updateExpressPreview();
+  }
+  function updateExpressPreview() {
+    const el = $('ex-prev'), inp = $('ex-in'); if (!el || !inp) return;
+    const lines = inp.value.split(/;/).map(parseExpress).filter(Boolean);
+    if (!lines.length) { el.textContent = inp.value.trim() ? 'Ajoute un montant, par exemple « 12,50 ».' : ''; return; }
+    const tx = expressToTx(lines[0]);
+    const when = tx.date === todayStr() ? 'aujourd’hui' : `le ${tx.date.slice(8, 10)}/${tx.date.slice(5, 7)}`;
+    el.replaceChildren('→ ', typeChip(tx.type), ' ', h('b', { text: tx.toSort ? 'À classer' : tx.category }), ` · ${money(tx.amount)} · ${tx.from} → ${tx.to} · ${when}`, lines.length > 1 ? ` (+${lines.length - 1} autre${lines.length > 2 ? 's' : ''})` : '');
+  }
+  function renderToSort() {
+    const box = $('c-tosort');
+    const list = S.tx.filter(t => t.toSort).sort((a, b) => b.date.localeCompare(a.date));
+    box.hidden = !list.length;
+    if (!list.length) { box.replaceChildren(); return; }
+    if (box.contains(document.activeElement)) return;
+    const rows = list.map(t => {
+      const type = h('select', { 'aria-label': 'Type' }, ...['Dépenses', 'Factures', 'Revenus', 'Remboursement'].map(x => opt(x, x, x === t.type)));
+      const cat = h('select', { 'aria-label': 'Catégorie' });
+      const fill = () => { const cs = catsFor(type.value); cat.replaceChildren(opt('', 'Choisir…'), ...cs.map(c => opt(c))); };
+      fill(); type.addEventListener('change', fill);
+      const acc = h('select', { 'aria-label': 'Compte' }, ...accNames().map(a => opt(a, a, a === (t.from === 'Externe' ? t.to : t.from))));
+      const desc = h('input', { type: 'text', value: t.description, 'aria-label': 'Description' });
+      const ok = h('button', { class: 'btn small primary', type: 'button', text: 'Classer', onclick: () => {
+        if (!cat.value) { cat.focus(); return; }
+        const inc = ['Revenus', 'Remboursement'].includes(type.value);
+        Object.assign(t, { type: type.value, category: cat.value, description: desc.value.trim(), from: inc ? 'Externe' : acc.value, to: inc ? acc.value : 'Externe' });
+        delete t.toSort; commit();
+        toast(`Classée dans ${t.category}. Les prochaines « ${t.description || t.category} » le seront automatiquement.`);
+      } });
+      const del = h('button', { class: 'btn small ghost danger', type: 'button', text: '✕', 'aria-label': 'Supprimer', onclick: () => { S.tx = S.tx.filter(x => x !== t); commit(); } });
+      return h('div', { class: 'sort-row' },
+        h('div', { class: 'sort-what' }, h('span', { class: 'num sort-amt', text: money(t.amount) }), h('span', { class: 'desc', text: `${t.date.slice(8, 10)}/${t.date.slice(5, 7)}` })),
+        desc, type, cat, acc, h('div', { class: 'acts' }, ok, del));
+    });
+    box.replaceChildren(h('h2', { text: `À classer (${list.length})` }),
+      h('p', { class: 'note', text: 'Elles comptent déjà dans tes soldes et tes dépenses. Choisis une catégorie : l’app s’en souviendra pour la prochaine fois.' }),
+      h('div', { class: 'sort-list' }, ...rows));
+  }
+  /** Ouverture par lien : ?saisie=12,50%20feuillette (plusieurs lignes séparées par %0A ou ;). */
+  function handleLaunchParams() {
+    let q = null;
+    try { const u = new URL(location.href); q = u.searchParams.get('saisie') || u.searchParams.get('add'); if (q) { u.searchParams.delete('saisie'); u.searchParams.delete('add'); history.replaceState(null, '', u.pathname + (u.search || '') + '#transactions'); } } catch (e) {}
+    if (!q || !S) return;
+    const c = addExpressLines(q); U.tab = 'transactions';
+    setTimeout(() => announce(c), 300);
   }
 
   // ---------------------------------------------------------------- prévisionnel
@@ -1654,7 +1816,7 @@
     $('period').addEventListener('change', () => { U.period = $('period').value; if (U.tab === 'transactions' && !U.editing) resetForm(); render(); });
     $('year').addEventListener('change', () => { U.year = +$('year').value; if (U.tab === 'transactions' && !U.editing) resetForm(); render(); });
     document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
-    $('quickAdd').addEventListener('click', () => { showTab('transactions'); resetForm(); $('f-amount').focus(); });
+    $('quickAdd').addEventListener('click', () => { showTab('transactions'); setTimeout(() => { const i = $('ex-in'); if (i) { i.focus(); i.scrollIntoView({ block: 'center' }); } }, 30); });
     $('f-type').addEventListener('change', () => { refreshFormOptions(); applyDefaults(); });
     $('f-cat').addEventListener('change', () => applyDefaults(true));
     $('txf').addEventListener('submit', onSubmit);
@@ -1687,6 +1849,7 @@
       const hash = location.hash.slice(1);
       if (TABS.includes(hash)) U.tab = hash;
       setStatus('Enregistré sur cet appareil');
+      handleLaunchParams();
     }
     render();
   }
