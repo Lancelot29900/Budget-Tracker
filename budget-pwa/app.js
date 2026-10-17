@@ -25,8 +25,16 @@
     Transferts: ['Virement interne','Retrait','Dépôt']
   };
   const ACCENTS = [['Vert','#2C6A4D'],['Bleu','#2B5C8A'],['Prune','#6D4C8E'],['Brique','#A84B2F'],['Ardoise','#46566B'],['Framboise','#A33D64']];
-  const CURRENCIES = [['EUR','Euro (€)'],['CHF','Franc suisse'],['CAD','Dollar canadien'],['USD','Dollar US'],['GBP','Livre sterling'],['MAD','Dirham marocain'],['TND','Dinar tunisien'],['DZD','Dinar algérien'],['XOF','Franc CFA (BCEAO)'],['XAF','Franc CFA (BEAC)']];
-  const LOCALES = [['fr-FR','1 234,56 € (France)'],['fr-BE','Belgique'],['fr-CH','Suisse'],['fr-CA','Canada'],['en-GB','1,234.56 (Royaume-Uni)'],['en-US','1,234.56 (États-Unis)'],['de-DE','1.234,56 (Allemagne)']];
+  const COMMON_CURRENCIES = ['EUR','CHF','USD','GBP','CAD','MAD','TND','DZD','XOF','XAF'];
+  const FALLBACK_CURRENCIES = ['EUR','CHF','USD','GBP','CAD','AUD','NZD','JPY','CNY','HKD','SGD','INR','BRL','MXN','ARS','CLP','COP','PEN','ZAR','MAD','TND','DZD','EGP','XOF','XAF','NGN','KES','TRY','ILS','AED','SAR','QAR','SEK','NOK','DKK','ISK','PLN','CZK','HUF','RON','BGN','RSD','UAH','RUB','THB','VND','IDR','MYR','PHP','KRW','TWD'];
+  // Formats de nombres : une langue + un pays. Seuls ceux que le navigateur sait afficher sont proposés.
+  const LOCALE_TAGS = ['fr-FR','fr-BE','fr-CH','fr-CA','fr-LU','fr-MC','fr-MA','fr-TN','fr-DZ','fr-SN','fr-CI','fr-CM','fr-BF','fr-ML','fr-MG','fr-CD','fr-RE','fr-MU','fr-HT','fr-NC','fr-PF',
+    'en-US','en-GB','en-IE','en-CA','en-AU','en-NZ','en-ZA','en-IN','en-SG','en-HK','en-NG','en-KE','en-PH','en-MT',
+    'de-DE','de-AT','de-CH','de-LU','de-BE','it-IT','it-CH','es-ES','es-MX','es-AR','es-CO','es-CL','es-PE','es-UY','es-VE','es-US','pt-PT','pt-BR','pt-AO','nl-NL','nl-BE','ca-ES','eu-ES','gl-ES',
+    'da-DK','sv-SE','nb-NO','fi-FI','is-IS','pl-PL','cs-CZ','sk-SK','hu-HU','ro-RO','bg-BG','el-GR','el-CY','hr-HR','sl-SI','sr-RS','bs-BA','mk-MK','sq-AL','et-EE','lv-LV','lt-LT','uk-UA','ru-RU','be-BY','ka-GE','hy-AM','az-AZ','kk-KZ',
+    'tr-TR','ar-MA','ar-TN','ar-DZ','ar-EG','ar-SA','ar-AE','ar-QA','ar-LB','ar-JO','he-IL','fa-IR','ur-PK','hi-IN','bn-BD','ta-IN','th-TH','vi-VN','id-ID','ms-MY','fil-PH','zh-CN','zh-TW','zh-HK','zh-SG','ja-JP','ko-KR','sw-KE','am-ET','af-ZA'];
+  const TABS = ['apercu', 'transactions', 'previsionnel', 'epargne', 'credits', 'reglages'];
+  const FREQS = [[1,'Chaque mois'],[2,'Tous les 2 mois'],[3,'Chaque trimestre'],[6,'Chaque semestre'],[12,'Chaque année']];
 
   // ---------------------------------------------------------------- utilitaires
   const $ = (id) => document.getElementById(id);
@@ -77,7 +85,7 @@
         { id: uid(), name: 'Compte courant', start: 0, savings: false },
         { id: uid(), name: 'Livret A', start: 0, savings: true }
       ],
-      categories: clone(DEFAULT_CATS), plan: {}, goals: [], loans: [], sample: false
+      categories: clone(DEFAULT_CATS), plan: {}, goals: [], loans: [], recurring: [], autoRecurring: false, sample: false
     };
   }
 
@@ -94,10 +102,15 @@
     // ancien format : plan sans année
     if (cfg.plan.Revenus || cfg.plan.Factures || cfg.plan['Dépenses'] || cfg.plan['Épargnes']) cfg.plan = { [cfg.year]: cfg.plan };
     cfg.goals = (Array.isArray(cfg.goals) ? cfg.goals : []).map(g => ({ id: g.id || uid(), category: g.category || '', account: g.account || '', start: r2(g.start), target: r2(g.target) }));
-    cfg.loans = (Array.isArray(cfg.loans) ? cfg.loans : []).map(l => ({ id: l.id || uid(), name: l.name || 'Crédit', category: l.category || '', capital: r2(l.capital), interest: r2(l.interest), months: parseInt(l.months, 10) || 0, rate: +l.rate || 0, monthly: r2(l.monthly), paidBefore: r2(l.paidBefore) }));
+    cfg.loans = (Array.isArray(cfg.loans) ? cfg.loans : []).map(l => ({ id: l.id || uid(), name: l.name || 'Crédit', category: l.category || '', capital: r2(l.capital), interest: r2(l.interest), months: parseInt(l.months, 10) || 0, rate: +l.rate || 0, monthly: r2(l.monthly), paidBefore: r2(l.paidBefore), startDate: /^\d{4}-\d{2}$/.test(l.startDate || '') ? l.startDate : '' }));
+    cfg.recurring = (Array.isArray(cfg.recurring) ? cfg.recurring : []).filter(r => r && TYPES.includes(r.type)).map(r => ({
+      id: r.id || uid(), label: String(r.label || ''), type: r.type, category: String(r.category || ''), from: String(r.from || 'Externe'), to: String(r.to || 'Externe'),
+      amount: r2(r.amount), day: Math.min(31, Math.max(1, parseInt(r.day, 10) || 1)), every: [1, 2, 3, 6, 12].includes(+r.every) ? +r.every : 1,
+      start: /^\d{4}-\d{2}$/.test(r.start || '') ? r.start : todayStr().slice(0, 7), end: /^\d{4}-\d{2}$/.test(r.end || '') ? r.end : '', pointed: !!r.pointed, active: r.active !== false }));
+    cfg.autoRecurring = !!cfg.autoRecurring;
     const tx = (Array.isArray(data.tx) ? data.tx : []).filter(t => t && /^\d{4}-\d{2}-\d{2}$/.test(t.date) && +t.amount > 0).map(t => ({
       id: t.id || uid(), date: t.date, amount: r2(t.amount), type: TYPES.includes(t.type) ? t.type : 'Dépenses',
-      category: String(t.category || ''), from: String(t.from || 'Externe'), to: String(t.to || 'Externe'), description: String(t.description || ''), pointed: t.pointed !== false
+      category: String(t.category || ''), from: String(t.from || 'Externe'), to: String(t.to || 'Externe'), description: String(t.description || ''), pointed: t.pointed !== false, ...(t.recurId ? { recurId: String(t.recurId) } : {})
     }));
     return { version: 1, cfg, tx };
   }
@@ -295,7 +308,7 @@
     if (!S) { renderOnboarding(); return; }
     applyLook(S.cfg);
     $('top').hidden = false;
-    $('p-onboarding').hidden = true;
+    $('p-onboarding').hidden = true; $('p-onboarding').replaceChildren();
     $('sampleBanner').hidden = !S.cfg.sample;
     // sélecteurs de période
     const ys = years(); if (!ys.includes(U.year)) U.year = ys[ys.length - 1];
@@ -303,27 +316,41 @@
     ysel.hidden = ys.length < 2;
     const ps = $('period'); ps.replaceChildren(...MONTHS.map((m, i) => opt(String(i + 1), ys.length < 2 ? `${m} ${U.year}` : m, String(i + 1) === U.period)), opt('year', ys.length < 2 ? `Année ${U.year}` : 'Année entière', U.period === 'year'));
     document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === U.tab)));
-    for (const t of ['apercu', 'transactions', 'previsionnel', 'epargne', 'reglages']) $('p-' + t).hidden = t !== U.tab;
+    for (const t of TABS) $('p-' + t).hidden = t !== U.tab;
     if (U.tab === 'apercu') renderApercu();
-    if (U.tab === 'transactions') { refreshFormOptions(); renderList(); }
+    if (U.tab === 'transactions') { refreshFormOptions(); renderRecurring(); renderList(); }
+    if (U.tab === 'credits') renderCredits();
     if (U.tab === 'previsionnel') renderPlan();
     if (U.tab === 'epargne') renderEpargne();
     if (U.tab === 'reglages') renderSettings();
   }
   function showTab(tab) {
-    if (!['apercu', 'transactions', 'previsionnel', 'epargne', 'reglages'].includes(tab)) tab = 'apercu';
-    U.tab = tab;
+    if (!TABS.includes(tab)) tab = 'apercu';
+    U.tab = tab; U.msg.recur = '';
     try { history.replaceState(null, '', '#' + tab); } catch (e) {}
     render();
     window.scrollTo({ top: 0 });
   }
 
   // ---------------------------------------------------------------- aperçu
+  function prevPeriod() {
+    if (U.period === 'year') return { p: 'year', y: U.year - 1, label: String(U.year - 1) };
+    const m = +U.period; return m === 1 ? { p: '12', y: U.year - 1, label: `déc. ${U.year - 1}` } : { p: String(m - 1), y: U.year, label: MSHORT[m - 2].toLowerCase() + '.' };
+  }
+  function overCategories(b) {
+    const out = [];
+    for (const g of ['Dépenses', 'Factures']) for (const c of Object.keys(b[g])) {
+      const p = planned(g, c), r = r2(b[g][c]);
+      if (r > p + 0.5) out.push({ c, over: r2(r - p), p });
+    }
+    return out.sort((a, z) => z.over - a.over);
+  }
   function renderApercu() {
     const b = budget(), t = b.tot;
     const pRev = plannedTotal('Revenus'), pF = plannedTotal('Factures'), pD = plannedTotal('Dépenses'), pE = plannedTotal('Épargnes');
     const reste = r2(t.Revenus - t.Factures - t['Dépenses']);
-    const rate = t.Revenus ? t['Épargnes'] / t.Revenus : 0;
+    const netSave = r2(t['Épargnes'] - t.reprises);
+    const rate = t.Revenus ? netSave / t.Revenus : 0;
     const overD = r2(t['Dépenses'] - pD);
     const lede = $('lede'); lede.replaceChildren();
     if (U.period !== 'year' && S.cfg.startDay > 1) {
@@ -333,17 +360,40 @@
     if (!S.tx.length) {
       lede.append('Ton budget est prêt. Ajoute ta première transaction avec « + Transaction », puis remplis ton prévisionnel pour comparer prévu et réel.');
     } else {
-      lede.append(`Sur ${periodLabel()} : `, h('b', { text: money(reste) }), ` de reste après factures et dépenses, et un taux d'épargne de `, h('b', { text: pct.format(rate) }), '. ');
+      lede.append(`Sur ${periodLabel()} : `, h('b', { text: money(reste) }), ` de reste après factures et dépenses, et `, h('b', { text: pct.format(rate) }), ` de tes revenus mis de côté. `);
       if (pD > 0) lede.append(overD > 0 ? `Tes dépenses dépassent le prévu de ${money(overD)}.` : `Tes dépenses restent ${money(-overD)} sous le prévu.`);
     }
-    const kpi = (lbl, val, sub, cls) => h('div', { class: 'kpi' }, h('span', { class: 'lbl', text: lbl }), h('span', { class: 'val ' + (cls || ''), text: val }), h('span', { class: 'sub', text: sub }));
+    // alertes
+    const alerts = $('alerts'); alerts.replaceChildren();
+    const alert = (cls, text, btnLabel, fn) => h('span', { class: 'alert ' + cls }, h('i'), text, btnLabel ? h('button', { type: 'button', text: btnLabel, onclick: fn }) : null);
+    if (U.period !== 'year') {
+      const st = recurStatus(U.year, +U.period).filter(x => !x.done);
+      if (st.length) alerts.append(alert('info', `${st.length} opération${st.length > 1 ? 's' : ''} récurrente${st.length > 1 ? 's' : ''} à reporter`, 'Reporter', () => { postRecurring(st, U.year, +U.period); commit(); }));
+    }
+    const unp = S.tx.filter(x => !x.pointed && inPeriod(x)).length;
+    if (unp) alerts.append(alert('', `${unp} transaction${unp > 1 ? 's' : ''} non pointée${unp > 1 ? 's' : ''}`, 'Voir', () => { $('fp').value = '0'; showTab('transactions'); }));
+    const over = overCategories(b);
+    over.slice(0, 3).forEach(o => alerts.append(alert('bad', `${o.c} : +${money(o.over)} ${o.p ? 'au-dessus du prévu' : 'sans budget prévu'}`)));
+    if (over.length > 3) alerts.append(alert('bad', `et ${over.length - 3} autre${over.length - 3 > 1 ? 's' : ''} catégorie${over.length - 3 > 1 ? 's' : ''} dépassée${over.length - 3 > 1 ? 's' : ''}`));
+    // KPI avec variation
+    const pp = prevPeriod(), pb = budget(pp.p, pp.y).tot, hasPrev = S.tx.some(x => inPeriod(x, pp.p, pp.y));
+    const pReste = r2(pb.Revenus - pb.Factures - pb['Dépenses']);
+    const delta = (cur, prev, upGood) => {
+      if (!hasPrev) return null;
+      const d = r2(cur - prev); if (Math.abs(d) < 0.005) return h('span', { class: 'delta mut', text: `= vs ${pp.label}` });
+      const good = upGood ? d > 0 : d < 0;
+      return h('span', { class: 'delta ' + (good ? 'pos' : 'neg'), text: `${d > 0 ? '▲' : '▼'} ${money(Math.abs(d))} vs ${pp.label}` });
+    };
+    const kpi = (lbl, val, sub, dl, cls) => h('div', { class: 'kpi' }, h('span', { class: 'lbl', text: lbl }), h('span', { class: 'val ' + (cls || ''), text: val }), dl, h('span', { class: 'sub', text: sub }));
     $('kpis').replaceChildren(
-      kpi('Revenus', money(t.Revenus), `prévu ${money(pRev)}`),
-      kpi('Factures', money(t.Factures), `prévu ${money(pF)}`),
-      kpi('Dépenses', money(t['Dépenses']), `prévu ${money(pD)}`, overD > 0.004 && pD > 0 ? 'neg' : ''),
-      kpi('Épargné', money(t['Épargnes']), `prévu ${money(pE)} · repris ${money(t.reprises)}`),
-      kpi('Reste', money(reste), 'revenus − factures − dépenses', reste < 0 ? 'neg' : '')
+      kpi('Revenus', money(t.Revenus), `prévu ${money(pRev)}`, delta(t.Revenus, pb.Revenus, true)),
+      kpi('Factures', money(t.Factures), `prévu ${money(pF)}`, delta(t.Factures, pb.Factures, false)),
+      kpi('Dépenses', money(t['Dépenses']), `prévu ${money(pD)}`, delta(t['Dépenses'], pb['Dépenses'], false), overD > 0.004 && pD > 0 ? 'neg' : ''),
+      kpi('Épargne nette', money(netSave), `épargné ${money(t['Épargnes'])} · repris ${money(t.reprises)} · prévu ${money(pE)}`, delta(netSave, r2(pb['Épargnes'] - pb.reprises), true)),
+      kpi('Reste', money(reste), 'revenus − factures − dépenses', delta(reste, pReste, true), reste < 0 ? 'neg' : '')
     );
+    renderPace(t['Dépenses'], pD);
+    renderAlloc(t, netSave);
     // comptes
     const { real, fut } = balances();
     const acc = h('div', { class: 'acc' }, h('span', { class: 'h', text: 'Compte' }), h('span', { class: 'h', style: 'text-align:right', text: 'Réel' }), h('span', { class: 'h', style: 'text-align:right', text: 'À venir' }));
@@ -356,6 +406,15 @@
     }
     acc.append(...row('Total', r2(tr), r2(tf), 'tot'));
     $('accounts').replaceChildren(S.cfg.accounts.length ? acc : h('p', { class: 'mut', text: 'Aucun compte. Ajoute-en dans Réglages.' }));
+    // plus grosses dépenses
+    const top = S.tx.filter(x => x.type === 'Dépenses' && inPeriod(x)).sort((a, z) => z.amount - a.amount).slice(0, 6);
+    $('top-note').textContent = `Les achats les plus importants de ${periodLabel()}.`;
+    const tl = h('div', { class: 'toplist' });
+    for (const x of top) tl.append(h('div', { class: 'toprow-i' },
+      h('div', { style: 'min-width:0' }, h('div', { text: x.description || x.category }), h('div', { class: 'desc', text: `${x.date.slice(8, 10)}/${x.date.slice(5, 7)} · ${x.category}` })),
+      h('span', { class: 'num', text: money(x.amount) }),
+      h('div', { class: 'bar' }, h('i', { style: `width:${x.amount / top[0].amount * 100}%;background:var(--ochre)` }))));
+    $('top-spend').replaceChildren(top.length ? tl : h('p', { class: 'mut', text: 'Aucune dépense sur cette période.' }));
     // détail
     const tb = h('tbody');
     for (const g of GROUPS) {
@@ -367,8 +426,8 @@
       tb.append(h('tr', { class: 'group' }, h('td', { text: g }), h('td', { class: 'r num', text: money(gp) }), h('td', { class: 'r num', text: money(gr) }), h('td'), h('td', { class: 'r num ' + (gd < 0 ? 'neg' : 'pos'), text: sgn(gd) })));
       for (const x of rows) {
         const d = r2(good(x.p, x.r)), w = Math.min(100, x.p ? x.r / x.p * 100 : 100);
-        const over = (g === 'Factures' || g === 'Dépenses') && x.r > x.p + 0.005;
-        const col = over ? 'var(--bad)' : g === 'Dépenses' ? 'var(--ochre)' : g === 'Épargnes' ? 'var(--plum)' : g === 'Factures' ? 'var(--muted)' : 'var(--accent)';
+        const ov = (g === 'Factures' || g === 'Dépenses') && x.r > x.p + 0.005;
+        const col = ov ? 'var(--bad)' : g === 'Dépenses' ? 'var(--ochre)' : g === 'Épargnes' ? 'var(--plum)' : g === 'Factures' ? 'var(--muted)' : 'var(--accent)';
         tb.append(h('tr', null, h('td', { text: x.c }), h('td', { class: 'r num mut', text: money(x.p) }), h('td', { class: 'r num', text: money(x.r) }),
           h('td', { style: 'width:22%' }, h('div', { class: 'bar' }, h('i', { style: `width:${Math.max(0, w)}%;background:${col}` }))),
           h('td', { class: 'r num ' + (Math.abs(d) < 0.005 ? 'mut' : d < 0 ? 'neg' : 'pos'), text: sgn(d) })));
@@ -376,7 +435,112 @@
     }
     $('detail').replaceChildren(h('thead', null, h('tr', null, h('th', { text: 'Catégorie' }), h('th', { class: 'r', text: 'Prévu' }), h('th', { class: 'r', text: 'Réel' }), h('th', { text: 'Consommé' }), h('th', { class: 'r', text: 'Écart' }))), tb);
     $('split-note').textContent = `Factures et dépenses de ${periodLabel()}, par catégorie.`;
-    drawMonths(); drawSplit();
+    drawMonths(); drawSplit(); drawWorth();
+  }
+
+  /** Rythme des dépenses variables sur la période : jauge, reste par jour, projection. */
+  function renderPace(spent, plan) {
+    const box = $('pace');
+    let a, z;
+    if (U.period === 'year') { a = monthRange(U.year, 1)[0]; z = monthRange(U.year, 12)[1]; } else [a, z] = monthRange(U.year, +U.period);
+    const DAY = 864e5, now = new Date(); now.setHours(12, 0, 0, 0);
+    a.setHours(12, 0, 0, 0); z.setHours(12, 0, 0, 0);
+    const total = Math.round((z - a) / DAY) + 1;
+    const state = now < a ? 'future' : now > z ? 'past' : 'current';
+    const elapsed = state === 'current' ? Math.round((now - a) / DAY) + 1 : state === 'past' ? total : 0;
+    const left = total - elapsed;
+    const remain = r2(plan - spent);
+    $('pace-note').textContent = U.period === 'year' ? `Dépenses variables de l'année ${U.year} face au prévu.` : `Dépenses variables du ${dfmt(a)} au ${dfmt(z)} face au prévu.`;
+    if (!plan && !spent) { box.replaceChildren(h('p', { class: 'mut', text: 'Aucune dépense ni budget prévu sur cette période. Remplis le prévisionnel pour suivre ton rythme.' })); return; }
+    const scale = Math.max(plan, spent) || 1;
+    const meter = h('div', { class: 'meter', role: 'img', 'aria-label': `${money(spent)} dépensés sur ${money(plan)} prévus` },
+      h('i', { style: `width:${Math.min(100, spent / scale * 100)}%;background:${spent > plan ? 'var(--bad)' : 'var(--ochre)'}` }));
+    if (state === 'current' && plan) meter.append(h('b', { title: 'Rythme attendu à date', style: `left:calc(${Math.min(100, plan * elapsed / total / scale * 100)}% - 1px)` }));
+    const figs = h('div', { class: 'pace-figs' });
+    const fig = (val, lbl, cls) => h('div', null, h('b', { class: cls || '', text: val }), h('small', { text: lbl }));
+    figs.append(fig(money(spent), `dépensés sur ${money(plan)}`, spent > plan && plan ? 'neg' : ''));
+    figs.append(fig(money(Math.abs(remain)), remain >= 0 ? 'restants' : 'de dépassement', remain < 0 ? 'neg' : ''));
+    if (state === 'current') {
+      figs.append(remain > 0 && left > 0 ? fig(money(remain / left), `par jour sur les ${left} jour${left > 1 ? 's' : ''} restant${left > 1 ? 's' : ''}`) : fig('0 €', `de marge pour les ${left} jour${left > 1 ? 's' : ''} restant${left > 1 ? 's' : ''}`, 'neg'));
+      const proj = r2(spent / Math.max(1, elapsed) * total);
+      figs.append(fig(money(proj), 'projection en fin de période', plan && proj > plan ? 'neg' : ''));
+    }
+    box.replaceChildren(meter, h('div', { class: 'meter-legend' }, h('span', { text: state === 'current' && plan ? 'Le trait marque où tu devrais en être aujourd’hui' : '' }), h('span', { text: `${Math.round(plan ? spent / plan * 100 : 100)} %` })), figs);
+  }
+
+  /** Ce que deviennent les revenus : factures, dépenses, épargne nette, reste. */
+  function renderAlloc(t, netSave) {
+    const box = $('alloc'); const R = t.Revenus;
+    if (R <= 0) { box.replaceChildren(h('p', { class: 'mut', text: 'Aucun revenu sur cette période.' })); return; }
+    const parts = [['Factures', t.Factures, 'var(--muted)'], ['Dépenses', t['Dépenses'], 'var(--ochre)'], ['Épargne nette', Math.max(0, netSave), 'var(--plum)']];
+    const used = parts.reduce((a, p) => a + p[1], 0), rest = r2(R - used);
+    if (rest > 0) parts.push(['Reste', rest, 'var(--accent)']);
+    const base = Math.max(R, used);
+    const bar = h('div', { class: 'alloc', role: 'img', 'aria-label': 'Répartition des revenus' }, ...parts.filter(p => p[1] > 0).map(p => h('i', { style: `width:${p[1] / base * 100}%;background:${p[2]}`, title: `${p[0]} ${money(p[1])}` })));
+    const list = h('div', { class: 'alloc-list' }, ...parts.map(p => h('div', null, h('i', { class: 'sw', style: `background:${p[2]}` }), h('span', { text: p[0] }), h('span', { class: 'num', text: money(r2(p[1])) }), h('span', { class: 'p', text: pct.format(p[1] / R) }))));
+    box.replaceChildren(...[bar, list,
+      rest < 0 ? h('p', { class: 'warn', style: 'margin:8px 0 0', text: `Tes sorties et ton épargne dépassent tes revenus de ${money(-rest)} sur la période.` }) : null,
+      h('p', { class: 'hint', style: 'margin:10px 0 0', text: 'Repère courant : environ 50 % pour les charges fixes, 30 % pour les envies, 20 % pour l’épargne.' })].filter(Boolean));
+  }
+
+  /** Avoirs et patrimoine net (avoirs − crédits restants) à la fin de chaque mois. */
+  function worthSeries() {
+    const last = lastActiveMonth(U.year), pts = [];
+    const sorted = S.tx.map(t => ({ t, b: bm(t.date) })).map(x => ({ ...x, i: mIdx(x.b.y, x.b.m) }));
+    const startBal = S.cfg.accounts.reduce((a, x) => a + x.start, 0);
+    const accSet = new Set(accNames());
+    for (let m = 1; m <= last; m++) {
+      const lim = mIdx(U.year, m); let assets = startBal, debt = 0;
+      for (const { t, i } of sorted) if (i <= lim) { if (accSet.has(t.from)) assets -= t.amount; if (accSet.has(t.to)) assets += t.amount; }
+      for (const l of S.cfg.loans) {
+        const tot = l.capital + l.interest; let paid = l.paidBefore;
+        for (const { t, i } of sorted) if (i <= lim && t.type === 'Factures' && t.category === l.category && t.date <= todayStr()) paid += t.amount;
+        debt += Math.max(0, tot - paid);
+      }
+      pts.push({ m, assets: r2(assets), net: r2(assets - debt) });
+    }
+    return pts;
+  }
+  function drawWorth() {
+    const box = $('ch-worth'); const W = box.clientWidth; if (!W) return;
+    const pts = worthSeries(); const hasDebt = S.cfg.loans.length > 0;
+    if (!pts.length) { box.replaceChildren(); return; }
+    const series = [{ k: 'assets', label: 'Avoirs', color: 'var(--accent)' }]; if (hasDebt) series.push({ k: 'net', label: 'Net de crédits', color: 'var(--plum)' });
+    const H = 200, m = { t: 12, r: 0, b: 24, l: 0 };
+    const vals = pts.flatMap(p => series.map(s => p[s.k]));
+    const step = niceStep(Math.max(1, Math.max(...vals) - Math.min(0, ...vals)));
+    const lo = Math.min(0, Math.floor(Math.min(...vals) / step) * step), hi = Math.ceil(Math.max(...vals) / step) * step || step;
+    const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'Évolution du patrimoine' });
+    box.replaceChildren(svg);
+    const ticks = []; for (let v = lo; v <= hi + 1e-9; v += step) ticks.push(v);
+    m.l = measure(svg, ticks.map(v => fmt0.format(v))) + 8;
+    const endLabels = series.map(s => `${s.label} ${fmt0.format(pts[pts.length - 1][s.k])}`);
+    m.r = Math.min(W * 0.4, measure(svg, endLabels) + 10);
+    const iw = W - m.l - m.r, ih = H - m.t - m.b, n = pts.length;
+    const x = (i) => m.l + (n > 1 ? i / (n - 1) : 0.5) * iw, y = (v) => m.t + ih - (v - lo) / (hi - lo) * ih;
+    for (const v of ticks) { svg.append(s('line', { x1: m.l, x2: m.l + iw, y1: y(v), y2: y(v), stroke: 'var(--line)' })); const t = s('text', { x: m.l - 6, y: y(v) + 4, 'text-anchor': 'end' }); t.textContent = fmt0.format(v); svg.append(t); }
+    pts.forEach((p, i) => { if (W < 420 && i % 2 && i !== n - 1) return; const t = s('text', { x: x(i), y: H - 6, 'text-anchor': 'middle' }); t.textContent = MSHORT[p.m - 1]; svg.append(t); });
+    const ends = [];
+    series.forEach(sr => {
+      const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[sr.k]).toFixed(1)}`).join('');
+      svg.append(s('path', { d, fill: 'none', stroke: sr.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      const lp = pts[n - 1]; svg.append(s('circle', { cx: x(n - 1), cy: y(lp[sr.k]), r: 3.5, fill: sr.color }));
+      ends.push({ y: y(lp[sr.k]), text: `${sr.label} ${fmt0.format(lp[sr.k])}`, color: sr.color });
+    });
+    ends.sort((a, b) => a.y - b.y); for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+    ends.forEach(e => { const t = s('text', { x: x(n - 1) + 8, y: e.y + 4, style: `fill:${e.color};font-weight:600` }); t.textContent = e.text; svg.append(t); });
+    const tip = tipFor(box);
+    const rule = s('line', { y1: m.t, y2: m.t + ih, stroke: 'var(--muted)', 'stroke-dasharray': '3 3', style: 'display:none' }); svg.append(rule);
+    const hit = s('rect', { x: m.l, y: m.t, width: iw, height: ih, fill: 'transparent' }); svg.append(hit);
+    hit.addEventListener('mousemove', (e) => {
+      const r = svg.getBoundingClientRect(), sc = r.width / W; const px = (e.clientX - r.left) / sc;
+      const i = Math.max(0, Math.min(n - 1, Math.round((px - m.l) / iw * (n - 1)))); const p = pts[i];
+      rule.setAttribute('x1', x(i)); rule.setAttribute('x2', x(i)); rule.style.display = '';
+      tip.replaceChildren(h('div', { class: 'h', text: `fin ${MONTHS[p.m - 1].toLowerCase()} ${U.year}` }), ...series.map(sr => h('div', null, h('i', { class: 'sw', style: `background:${sr.color}` }), `${sr.label} ${money(p[sr.k])}`)), hasDebt ? h('div', { class: 'h', text: `Crédits restants ${money(r2(p.assets - p.net))}` }) : null);
+      placeTip(box, tip, x(i) * sc, y(Math.max(...series.map(sr => p[sr.k]))) * sc);
+    });
+    hit.addEventListener('mouseleave', () => { tip.hidden = true; rule.style.display = 'none'; });
+    box.append(tip);
   }
 
   function tipFor(box) { let t = box.querySelector('.tip'); if (!t) t = h('div', { class: 'tip', hidden: true }); box.append(t); return t; }
@@ -389,7 +553,7 @@
   function measure(svg, texts) {
     let w = 0; for (const tx of texts) { const t = s('text'); t.textContent = tx; svg.append(t); w = Math.max(w, t.getComputedTextLength()); t.remove(); } return w;
   }
-  function niceStep(max) { const raw = max / 4; const p = Math.pow(10, Math.floor(Math.log10(raw || 1))); const n = raw / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; }
+  function niceStep(max) { const raw = max / 4; const p = Math.pow(10, Math.floor(Math.log10(raw || 1))); const n = raw / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
 
   function drawMonths() {
     const box = $('ch-months'); const W = box.clientWidth; if (!W) return;
@@ -425,7 +589,8 @@
         tip.replaceChildren(h('div', { class: 'h', text: `${MONTHS[d.i]} ${U.year}` }),
           h('div', null, h('i', { class: 'sw', style: 'background:var(--accent)' }), `Revenus ${money(d.rev)}`),
           h('div', null, h('i', { class: 'sw', style: 'background:var(--ochre)' }), `Factures + dépenses ${money(d.out)}`),
-          h('div', null, h('i', { class: 'sw', style: 'background:var(--plum)' }), `Épargne ${money(d.ep)}`));
+          h('div', null, h('i', { class: 'sw', style: 'background:var(--plum)' }), `Épargne ${money(d.ep)}`),
+          h('div', { class: 'h', text: `Reste ${money(r2(d.rev - d.out))}` }));
         placeTip(box, tip, m.l + d.i * bw + bw / 2, y(Math.max(d.rev, d.out, d.ep)));
       };
       hit.addEventListener('mouseenter', show);
@@ -516,6 +681,7 @@
     if (!$('f-cat').value) { err.textContent = 'Choisis une catégorie. Tu peux en créer dans Réglages.'; return; }
     if (from === to) { err.textContent = '« Depuis » et « Vers » doivent être deux comptes différents.'; return; }
     const tx = { id: U.editing || uid(), date, amount, type: $('f-type').value, category: $('f-cat').value, from, to, description: $('f-desc').value.trim(), pointed: $('f-pointed').checked };
+    const prevTx = U.editing && S.tx.find(x => x.id === U.editing); if (prevTx?.recurId) tx.recurId = prevTx.recurId;
     const wasEdit = !!U.editing;
     U.lastAcc[tx.type] = [from, to];
     upsertTx(tx);
@@ -552,7 +718,9 @@
           h('button', { class: 'btn small danger', type: 'button', text: 'Oui', onclick: () => removeTx(t.id) }),
           h('button', { class: 'btn small', type: 'button', text: 'Non', onclick: () => renderList() }));
       });
-      acts.append(h('button', { class: 'btn small', type: 'button', text: 'Modifier', onclick: () => editTx(t) }), del);
+      const mk = h('button', { class: 'btn small ghost', type: 'button', text: '↻', title: t.recurId ? 'Issue d’une récurrente' : 'Rendre récurrente (chaque mois)', 'aria-label': 'Rendre récurrente', disabled: !!t.recurId || null,
+        onclick: () => { recurFromTx(t); U.recurOpen = true; U.msg.recur = `« ${t.description || t.category} » ajoutée aux récurrentes (chaque mois le ${+t.date.slice(8, 10)}).`; commit(); setTimeout(() => $('c-recur').scrollIntoView({ behavior: 'smooth' }), 50); } });
+      acts.append(mk, h('button', { class: 'btn small', type: 'button', text: 'Modifier', onclick: () => editTx(t) }), del);
       tb.append(h('tr', { class: t.pointed ? '' : 'unpointed' },
         h('td', null, cb),
         h('td', { class: 'num', text: `${t.date.slice(8, 10)}/${t.date.slice(5, 7)}` }),
@@ -562,6 +730,182 @@
     }
     if (!rows.length) tb.append(h('tr', null, h('td', { colspan: 5, class: 'mut', style: 'text-align:center;padding:24px', text: S.tx.length ? 'Aucune transaction ne correspond sur cette période.' : 'Aucune transaction pour l’instant. Ajoute la première avec le formulaire.' })));
     $('txlist').replaceChildren(h('thead', null, h('tr', null, h('th', { text: '✓' }), h('th', { text: 'Date' }), h('th', { text: 'Catégorie' }), h('th', { class: 'r', text: 'Montant' }), h('th'))), tb);
+  }
+
+  // ---------------------------------------------------------------- opérations récurrentes
+  const mIdx = (y, m) => y * 12 + m - 1;
+  const ymOf = (i) => ({ y: Math.floor(i / 12), m: (i % 12) + 1 });
+  const ymStr = (y, m) => `${y}-${pad2(m)}`;
+  const parseYm = (s) => { const [y, m] = s.split('-').map(Number); return mIdx(y, m); };
+  const daysIn = (y, m) => new Date(y, m, 0).getDate();
+  const monthName = (y, m) => `${MONTHS[m - 1].toLowerCase()} ${y}`;
+
+  function isDue(r, y, m) {
+    if (!r.active || !r.start) return false;
+    const i = mIdx(y, m), s = parseYm(r.start);
+    if (i < s) return false;
+    if (r.end && i > parseYm(r.end)) return false;
+    return (i - s) % (r.every || 1) === 0;
+  }
+  /** Date calendaire d'une récurrente pour un mois budgétaire donné (tient compte du jour de début). */
+  function recurDate(r, y, m) {
+    let first = null;
+    for (const d of [0, -1, 1]) {
+      const { y: cy, m: cm } = ymOf(mIdx(y, m) + d);
+      const date = `${cy}-${pad2(cm)}-${pad2(Math.min(r.day, daysIn(cy, cm)))}`;
+      if (!first) first = date;
+      const b = bm(date); if (b.y === y && b.m === m) return date;
+    }
+    return first;
+  }
+  function recurStatus(y, m) {
+    return S.cfg.recurring.filter(r => isDue(r, y, m)).map(r => ({
+      r, date: recurDate(r, y, m),
+      done: S.tx.some(t => t.recurId === r.id && (() => { const b = bm(t.date); return b.y === y && b.m === m; })())
+    }));
+  }
+  function postRecurring(items, y, m) {
+    let n = 0;
+    for (const { r, done } of items) {
+      if (done) continue;
+      S.tx.push({ id: uid(), date: recurDate(r, y, m), amount: r.amount, type: r.type, category: r.category, from: r.from, to: r.to, description: r.label, pointed: r.pointed, recurId: r.id });
+      n++;
+    }
+    return n;
+  }
+  function recurFromTx(t) {
+    const b = bm(t.date);
+    const r = { id: uid(), label: t.description || t.category, type: t.type, category: t.category, from: t.from, to: t.to, amount: t.amount, day: +t.date.slice(8, 10), every: 1, start: ymStr(b.y, b.m), end: '', pointed: false, active: true };
+    S.cfg.recurring.push(r); t.recurId = r.id;
+    return r;
+  }
+  /** Repère dans l'historique récent les opérations qui reviennent chaque mois et ne sont pas encore des récurrentes. */
+  function suggestRecurring() {
+    const tb = bm(todayStr()), cur = mIdx(tb.y, tb.m);
+    const groups = new Map();
+    const keyOf = (t) => {
+      if (t.type === 'Remboursement') return null;
+      if (t.type === 'Dépenses') return t.description ? `D|${t.category}|${t.description.toLowerCase()}` : null;
+      if (t.type === 'Transfert de fonds') return `T|${t.category}|${t.from}|${t.to}`;
+      if (t.type === 'Épargnes' || t.type === "Reprise d'épargne") return `${t.type}|${t.category}|${t.from}|${t.to}`;
+      return `${t.type}|${t.category}|${t.from}|${t.to}`;
+    };
+    for (const t of S.tx) {
+      const b = bm(t.date), i = mIdx(b.y, b.m);
+      if (i < cur - 3 || i > cur) continue;
+      const k = keyOf(t); if (!k) continue;
+      const g = groups.get(k) || { months: new Set(), last: null, days: [], amounts: [] };
+      g.months.add(i); g.days.push(+t.date.slice(8, 10)); g.amounts.push(t.amount);
+      if (!g.last || t.date >= g.last.date) g.last = t;
+      groups.set(k, g);
+    }
+    const covered = (t) => S.cfg.recurring.some(r => r.type === t.type && r.category === t.category && r.from === t.from && r.to === t.to);
+    const out = [];
+    for (const g of groups.values()) {
+      if (g.months.size < 2 || Math.max(...g.months) < cur - 1 || covered(g.last)) continue;
+      // montants irréguliers sur seulement 2 mois : sans doute des opérations ponctuelles
+      if (g.months.size < 3 && Math.max(...g.amounts) > 1.3 * Math.min(...g.amounts)) continue;
+      // plusieurs opérations par mois : pas une échéance régulière
+      if (g.amounts.length > g.months.size + 1) continue;
+      const days = g.days.sort((a, b) => a - b), day = days[Math.floor(days.length / 2)];
+      const t = g.last;
+      out.push({ label: t.description || t.category, type: t.type, category: t.category, from: t.from, to: t.to, amount: t.amount, day, months: g.months.size });
+    }
+    return out.sort((a, b) => TYPES.indexOf(a.type) - TYPES.indexOf(b.type) || b.amount - a.amount);
+  }
+  function addSuggestion(sg) {
+    const tb = bm(todayStr());
+    const r = { id: uid(), label: sg.label, type: sg.type, category: sg.category, from: sg.from, to: sg.to, amount: sg.amount, day: sg.day, every: 1, start: ymStr(tb.y, tb.m), end: '', pointed: false, active: true };
+    S.cfg.recurring.push(r);
+    // les opérations déjà saisies ce mois-ci comptent comme reportées
+    const match = S.tx.find(t => !t.recurId && t.type === r.type && t.category === r.category && t.from === r.from && t.to === r.to && (() => { const b = bm(t.date); return b.y === tb.y && b.m === tb.m; })());
+    if (match) match.recurId = r.id;
+  }
+
+  function renderRecurring() {
+    const box = $('c-recur');
+    const p = U.period === 'year' ? null : +U.period, y = U.year;
+    const head = h('div', { class: 'rec-head' }, h('div', null, h('h2', { text: 'Opérations récurrentes' }),
+      h('p', { class: 'note', style: 'margin-bottom:0', text: 'Factures, salaire, virements d’épargne… Définis-les une fois, puis reporte-les chaque mois en un clic.' })));
+    const parts = [head];
+    if (p) {
+      const st = recurStatus(y, p), todo = st.filter(x => !x.done);
+      if (st.length) {
+        const total = todo.reduce((a, x) => a + (x.r.type === 'Revenus' ? x.r.amount : -x.r.amount) * (['Revenus', 'Factures', 'Dépenses'].includes(x.r.type) ? 1 : 0), 0);
+        head.append(todo.length
+          ? h('button', { class: 'btn primary', type: 'button', id: 'rec-post-all', text: `Reporter les ${todo.length} de ${MONTHS[p - 1].toLowerCase()}`, onclick: () => { const n = postRecurring(todo, y, p); U.msg.recur = `${n} opération${n > 1 ? 's' : ''} reportée${n > 1 ? 's' : ''} en ${monthName(y, p)}, non pointée${n > 1 ? 's' : ''}.`; commit(); } })
+          : h('span', { class: 'done', style: 'color:var(--ok);font-size:13px', text: `✓ Tout est reporté pour ${MONTHS[p - 1].toLowerCase()}` }));
+        const list = h('div', { class: 'rec-due' });
+        for (const x of st) {
+          const sign = x.r.type === 'Revenus' ? '+' : ['Factures', 'Dépenses'].includes(x.r.type) ? '−' : '';
+          list.append(h('div', null,
+            h('div', null, h('div', null, typeChip(x.r.type), ' ', x.r.label || x.r.category), h('div', { class: 'desc', text: `le ${+x.date.slice(8, 10)} · ${x.r.category} · ${x.r.from} → ${x.r.to}` })),
+            h('span', { class: 'num' + (sign === '+' ? ' pos' : ''), text: sign + money(x.r.amount) }),
+            x.done ? h('span', { class: 'done', text: '✓ reportée' }) : h('button', { class: 'btn small', type: 'button', text: 'Reporter', onclick: () => { postRecurring([x], y, p); commit(); } })));
+        }
+        parts.push(todo.length ? list : h('details', { class: 'more' }, h('summary', { text: `Voir les ${st.length} opérations de ${MONTHS[p - 1].toLowerCase()}` }), list));
+        if (total) parts.push(h('p', { class: 'hint', style: 'margin:8px 0 0', text: `Solde des récurrentes de ${MONTHS[p - 1].toLowerCase()} : ${sgn(r2(total))} (revenus − factures et dépenses).` }));
+      } else parts.push(h('p', { class: 'hint', text: S.cfg.recurring.length ? `Aucune récurrente prévue en ${monthName(y, p)}.` : 'Aucune récurrente pour l’instant. Ajoute-en une, transforme une transaction avec le bouton ↻, ou pars des suggestions ci-dessous.' }));
+    } else parts.push(h('p', { class: 'hint', text: 'Choisis un mois en haut pour reporter ses opérations récurrentes.' }));
+    if (U.msg.recur) parts.push(h('p', { class: 'ok-msg', text: U.msg.recur }));
+
+    // suggestions
+    const sugg = suggestRecurring();
+    if (sugg.length) {
+      const sl = h('div', { class: 'sugg' });
+      sugg.forEach((sg, i) => sl.append(h('div', null,
+        h('div', null, h('div', null, typeChip(sg.type), ' ', sg.label), h('div', { class: 'desc', text: `vers le ${sg.day} · vue ${sg.months} mois sur les 4 derniers · ${sg.from} → ${sg.to}` })),
+        h('span', { class: 'num', text: money(sg.amount) }),
+        h('button', { class: 'btn small', type: 'button', id: `sugg-${i}`, text: 'Ajouter', onclick: () => { addSuggestion(sg); commit(); } }))));
+      parts.push(h('details', { class: 'more', open: !S.cfg.recurring.length || null },
+        h('summary', { text: `Suggestions détectées dans tes transactions (${sugg.length})` }),
+        h('div', { class: 'btnrow', style: 'margin:8px 0' }, h('button', { class: 'btn small', type: 'button', text: 'Tout ajouter', onclick: () => { sugg.forEach(addSuggestion); commit(); } })), sl));
+    }
+
+    // gestion
+    const items = h('div', { class: 'rec-items' });
+    S.cfg.recurring.forEach((r, i) => {
+      const f = (label, el) => h('label', { class: 'field' }, label, el);
+      const inp = (k, attrs, parse) => { const el = h('input', { id: `rec-${k}-${r.id}`, ...attrs }); el.addEventListener('change', () => { const v = parse(el.value); if (v !== null) { r[k] = v; commit(); } }); return el; };
+      const sel = (k, values, labels) => { const el = h('select', { id: `rec-${k}-${r.id}` }, ...values.map((v, j) => opt(String(v), labels ? labels[j] : v, String(v) === String(r[k])))); el.addEventListener('change', () => { r[k] = k === 'every' ? +el.value : el.value; if (k === 'type') { r.category = catsFor(r.type)[0] || ''; } commit(); }); return el; };
+      const cats = catsFor(r.type); const catVals = cats.includes(r.category) || !r.category ? cats : [r.category, ...cats];
+      const accs = ['Externe', ...accNames()];
+      const chk = (k, label) => { const el = h('input', { type: 'checkbox', id: `rec-${k}-${r.id}`, checked: r[k] }); el.addEventListener('change', () => { r[k] = el.checked; commit(); }); return h('label', { class: 'field check' }, el, label); };
+      items.append(h('div', { class: 'rec-item' + (r.active ? '' : ' off') },
+        h('div', { class: 'fields' },
+          f('Libellé', inp('label', { type: 'text', value: r.label }, v => v.trim())),
+          f('Type', sel('type', TYPES)),
+          f('Catégorie', sel('category', catVals)),
+          f('Montant', inp('amount', { type: 'text', inputmode: 'decimal', value: num2.format(r.amount) }, v => { const n = r2(parseNum(v)); return n > 0 ? n : null; })),
+          f('Depuis', sel('from', accs.includes(r.from) ? accs : [r.from, ...accs])),
+          f('Vers', sel('to', accs.includes(r.to) ? accs : [r.to, ...accs])),
+          f('Jour du mois', inp('day', { type: 'number', min: 1, max: 31, value: r.day, inputmode: 'numeric' }, v => { const n = parseInt(v, 10); return n >= 1 && n <= 31 ? n : null; })),
+          f('Fréquence', sel('every', FREQS.map(x => x[0]), FREQS.map(x => x[1]))),
+          f('À partir de', inp('start', { type: 'month', value: r.start }, v => /^\d{4}-\d{2}$/.test(v) ? v : null)),
+          f('Jusqu’à (optionnel)', inp('end', { type: 'month', value: r.end }, v => /^\d{4}-\d{2}$/.test(v) || v === '' ? v : null))),
+        h('div', { class: 'btnrow', style: 'margin-top:8px' }, chk('active', 'Active'), chk('pointed', 'Reporter déjà pointée'),
+          h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', style: 'margin-left:auto', onclick: () => { S.cfg.recurring.splice(i, 1); S.tx.forEach(t => { if (t.recurId === r.id) delete t.recurId; }); commit(); } }))));
+    });
+    const auto = h('input', { type: 'checkbox', id: 'rec-auto', checked: S.cfg.autoRecurring });
+    auto.addEventListener('change', () => { S.cfg.autoRecurring = auto.checked; commit(); });
+    parts.push(h('details', { class: 'more', id: 'rec-manage', open: U.recurOpen || null, ontoggle: (e) => { U.recurOpen = e.target.open; } },
+      h('summary', { text: `Gérer les récurrentes (${S.cfg.recurring.length})` }),
+      h('label', { class: 'check', style: 'margin:10px 0 0;font-size:13px' }, auto, 'Reporter automatiquement les récurrentes du mois en cours à l’ouverture de l’app'),
+      items,
+      h('div', { class: 'btnrow', style: 'margin-top:10px' }, h('button', { class: 'btn', type: 'button', text: '+ Nouvelle récurrente', onclick: () => {
+        const tb = bm(todayStr());
+        S.cfg.recurring.push({ id: uid(), label: 'Nouvelle opération', type: 'Factures', category: S.cfg.categories.Factures[0] || '', from: mainAcc(), to: 'Externe', amount: 10, day: 1, every: 1, start: ymStr(tb.y, tb.m), end: '', pointed: false, active: true });
+        U.recurOpen = true; commit();
+      } })),
+      h('p', { class: 'hint', text: 'Les opérations reportées arrivent non pointées (dans « À venir ») : coche-les quand elles passent sur ton compte. Pour un crédit, indique la dernière échéance dans « Jusqu’à ».' })));
+    box.replaceChildren(...parts);
+  }
+  /** Report automatique pour le mois en cours (option des réglages). */
+  function autoPostRecurring() {
+    if (!S.cfg.autoRecurring) return;
+    const tb = bm(todayStr());
+    const n = postRecurring(recurStatus(tb.y, tb.m), tb.y, tb.m);
+    if (n) { U.msg.recur = `${n} opération${n > 1 ? 's' : ''} récurrente${n > 1 ? 's' : ''} reportée${n > 1 ? 's' : ''} automatiquement pour ${monthName(tb.y, tb.m)}.`; save(); }
   }
 
   // ---------------------------------------------------------------- prévisionnel
@@ -617,32 +961,7 @@
     const l = $('ep-lede'); l.replaceChildren();
     if (S.cfg.goals.length) l.append('Tu as ', h('b', { text: money(r2(total)) }), ' sur tes objectifs, soit ', h('b', { text: sgn(r2(total - startTot)) }), ` depuis le départ (${money(r2(saved))} épargnés, ${money(r2(taken))} repris).`);
     else l.append('Crée des objectifs d’épargne dans Réglages pour suivre leur progression ici.');
-    // crédits
-    const lb = $('loans'); lb.replaceChildren();
-    const revs = MONTHS.map((_, i) => budget(String(i + 1)).tot.Revenus).filter(v => v > 0);
-    const avgRev = revs.length ? revs.reduce((a, b) => a + b, 0) / revs.length : 0;
-    let monthlyTot = 0;
-    for (const ln of S.cfg.loans) {
-      const total = r2(ln.capital + ln.interest);
-      const paid = r2(ln.paidBefore + S.tx.filter(t => t.type === 'Factures' && t.category === ln.category).reduce((a, t) => a + t.amount, 0));
-      const rest = Math.max(0, r2(total - paid)), prog = total ? paid / total : 0;
-      if (rest > 0) monthlyTot += ln.monthly;
-      const left = ln.monthly ? Math.ceil(rest / ln.monthly - 0.001) : 0;
-      lb.append(h('div', { style: 'margin-bottom:16px' },
-        h('div', { style: 'font-weight:600;margin-bottom:6px', text: [ln.name, ln.capital ? `${fmt0.format(ln.capital)}` : '', ln.rate ? `à ${num2.format(ln.rate)} %` : '', ln.months ? `sur ${ln.months} mois` : ''].filter(Boolean).join(' · ') }),
-        h('div', { class: 'statrow' },
-          h('div', null, h('span', { class: 'big', text: money(rest) }), h('small', { text: 'reste dû' })),
-          h('div', null, h('span', { class: 'big', style: 'font-size:22px', text: money(paid) }), h('small', { text: `remboursé sur ${money(total)}` })),
-          ln.monthly ? h('div', null, h('span', { class: 'big', style: 'font-size:22px', text: String(left) }), h('small', { text: `mensualités de ${money(ln.monthly)} restantes` })) : null),
-        h('div', { style: 'display:flex;gap:8px;align-items:center' }, h('div', { class: 'bar', style: 'flex:1;height:8px' }, h('i', { style: `width:${Math.min(100, prog * 100)}%` })), h('span', { class: 'num', style: 'font-size:12px', text: pct.format(prog) })),
-        ln.category ? null : h('p', { class: 'warn', text: 'Choisis la catégorie de factures de ce crédit dans Réglages pour compter les remboursements.' })));
-    }
-    if (!S.cfg.loans.length) lb.append(h('p', { class: 'mut' }, 'Aucun crédit enregistré. ', h('button', { class: 'btn small', type: 'button', text: 'Ajouter un crédit', onclick: () => { U.settingsFocus = 'loans'; showTab('reglages'); } })));
-    else {
-      const rate = avgRev ? monthlyTot / avgRev : 0;
-      lb.append(h('p', { class: 'note', style: 'margin:0' }, 'Taux d’endettement : ', h('b', { class: rate > 0.35 ? 'neg' : '', text: pct.format(rate) }), ` de ton revenu mensuel moyen en ${U.year} (${money(r2(avgRev))}), pour un plafond conseillé de 35 %.`));
-    }
-    drawEvo();
+    drawEvo(); drawRate();
   }
   function drawEvo() {
     const box = $('ch-evo'); const W = box.clientWidth; if (!W) return;
@@ -681,27 +1000,253 @@
     box.append(tip);
   }
 
+  function drawRate() {
+    const box = $('ch-rate'); const W = box.clientWidth; if (!W) return;
+    const last = lastActiveMonth(U.year);
+    const pts = []; for (let m = 1; m <= last; m++) { const b = budget(String(m)).tot; pts.push({ m, v: b.Revenus ? (b['Épargnes'] - b.reprises) / b.Revenus : 0, rev: b.Revenus, net: r2(b['Épargnes'] - b.reprises) }); }
+    const H = 190, mg = { t: 10, r: 4, b: 24, l: 0 };
+    const lo = Math.min(0, Math.floor(Math.min(...pts.map(p => p.v)) * 10) / 10), hi = Math.max(0.3, Math.ceil(Math.max(...pts.map(p => p.v)) * 10) / 10);
+    const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'Taux d’épargne mensuel' });
+    box.replaceChildren(svg);
+    const stepT = (hi - lo) > 0.6 ? 0.2 : 0.1, ticks = []; for (let v = lo; v <= hi + 1e-9; v += stepT) ticks.push(Math.round(v * 100) / 100);
+    mg.l = measure(svg, ticks.map(v => pct.format(v))) + 8;
+    const iw = W - mg.l - mg.r, ih = H - mg.t - mg.b, bw = iw / 12;
+    const y = (v) => mg.t + ih - (v - lo) / (hi - lo) * ih;
+    for (const v of ticks) { svg.append(s('line', { x1: mg.l, x2: W - mg.r, y1: y(v), y2: y(v), stroke: 'var(--line)' })); const t = s('text', { x: mg.l - 6, y: y(v) + 4, 'text-anchor': 'end' }); t.textContent = pct.format(v); svg.append(t); }
+    svg.append(s('line', { x1: mg.l, x2: W - mg.r, y1: y(0.2), y2: y(0.2), stroke: 'var(--accent)', 'stroke-dasharray': '4 4' }));
+    const tip = tipFor(box);
+    pts.forEach(p => {
+      const x0 = mg.l + (p.m - 1) * bw + bw * 0.2, w = bw * 0.6;
+      const top = y(Math.max(0, p.v)), bot = y(Math.min(0, p.v));
+      svg.append(s('rect', { x: x0, y: top, width: w, height: Math.max(1, bot - top), rx: Math.min(4, w / 2), fill: p.v < 0 ? 'var(--bad)' : p.v >= 0.2 ? 'var(--plum)' : 'color-mix(in srgb, var(--plum) 55%, var(--sunk))' }));
+      const t = s('text', { x: x0 + w / 2, y: H - 6, 'text-anchor': 'middle' }); t.textContent = W < 420 ? MSHORT[p.m - 1].slice(0, 1) : MSHORT[p.m - 1]; svg.append(t);
+      const hit = s('rect', { x: mg.l + (p.m - 1) * bw, y: mg.t, width: bw, height: ih, fill: 'transparent' });
+      hit.addEventListener('mouseenter', () => { tip.replaceChildren(h('div', { class: 'h', text: `${MONTHS[p.m - 1]} ${U.year}` }), h('div', { text: `${pct.format(p.v)} des revenus` }), h('div', { class: 'h', text: `${money(p.net)} sur ${money(p.rev)}` })); placeTip(box, tip, mg.l + (p.m - 0.5) * bw, top); });
+      hit.addEventListener('mouseleave', () => tip.hidden = true); svg.append(hit);
+    });
+    box.append(tip);
+  }
+
+  // ---------------------------------------------------------------- crédits
+  const ymLabel = (i, short) => { const { y, m } = ymOf(i); return short ? `${MSHORT[m - 1]} ${String(y).slice(2)}` : `${MONTHS[m - 1].toLowerCase()} ${y}`; };
+  function loanInfo(l) {
+    const C = l.capital, n = l.months, r = (l.rate || 0) / 1200;
+    const M = l.monthly || (n && C ? r2(r ? C * r / (1 - Math.pow(1 + r, -n)) : C / n) : 0);
+    const interest = l.interest || (M && n ? Math.max(0, r2(M * n - C)) : 0);
+    const total = r2(C + interest);
+    const byMonth = new Map(); let tracked = 0;
+    const today = todayStr();
+    for (const t of S.tx) if (t.type === 'Factures' && t.category && t.category === l.category && t.date <= today) { const b = bm(t.date), i = mIdx(b.y, b.m); byMonth.set(i, (byMonth.get(i) || 0) + t.amount); tracked += t.amount; }
+    const paid = r2(l.paidBefore + tracked), rest = Math.max(0, r2(total - paid));
+    const tb = bm(todayStr()), cur = mIdx(tb.y, tb.m);
+    const firstTx = byMonth.size ? Math.min(...byMonth.keys()) : null;
+    const start = l.startDate ? parseYm(l.startDate) : (firstTx ?? cur);
+    const plannedEnd = n ? start + n - 1 : null;
+    const left = M ? Math.max(rest > 0 ? 1 : 0, Math.ceil(rest / M - 0.05)) : 0;
+    const base = byMonth.has(cur) ? cur : cur - 1;
+    const projEnd = rest > 0 ? base + left : (byMonth.size ? Math.max(...byMonth.keys()) : cur);
+    // série réelle : reste dû après les paiements de chaque mois
+    const actual = []; const a0 = firstTx != null ? firstTx - 1 : cur - 1; let rem = total - l.paidBefore;
+    actual.push({ i: a0, v: r2(rem) });
+    for (let i = a0 + 1; i <= Math.max(a0 + 1, Math.min(cur, byMonth.size ? Math.max(...byMonth.keys()) : cur)); i++) { rem -= byMonth.get(i) || 0; actual.push({ i, v: r2(Math.max(0, rem)) }); }
+    const projected = [actual[actual.length - 1]];
+    if (M) { let v = projected[0].v, i = projected[0].i; while (v > Math.max(0.005, 0.05 * M) && projected.length < 600) { v = Math.max(0, v - M); i++; projected.push({ i, v: r2(v < 0.05 * M ? 0 : v) }); } }
+    // tableau d'amortissement théorique
+    const sched = []; let bal = C;
+    for (let k = 1; k <= n && M; k++) { const it = r2(bal * r), cp = r2(Math.min(bal, M - it)); bal = Math.max(0, bal - cp); sched.push({ k, i: start + k - 1, interest: it, capital: cp, bal: r2(bal) }); }
+    const paidCount = M ? Math.min(n || Infinity, Math.round(paid / M)) : 0;
+    const interestPaid = r2(sched.slice(0, paidCount).reduce((a, x) => a + x.interest, 0));
+    return { M, interest, total, paid, rest, start, plannedEnd, projEnd, left, actual, projected, sched, paidCount, interestPaid, cur, byMonth };
+  }
+
+  function renderCredits() {
+    const box = $('p-credits');
+    if (!S.cfg.loans.length) {
+      box.replaceChildren(h('div', { class: 'card', style: 'margin-top:16px' }, h('h2', { text: 'Aucun crédit enregistré' }),
+        h('p', { class: 'note', text: 'Ajoute tes prêts (auto, immobilier, conso…) pour suivre ce qu’il reste à rembourser, la date de fin et ton taux d’endettement.' }),
+        h('button', { class: 'btn primary', type: 'button', text: 'Ajouter un crédit', onclick: () => { U.settingsFocus = 'loans'; showTab('reglages'); } })));
+      return;
+    }
+    const infos = S.cfg.loans.map(l => ({ l, x: loanInfo(l) }));
+    const restTot = r2(infos.reduce((a, o) => a + o.x.rest, 0));
+    const monthly = r2(infos.filter(o => o.x.rest > 0).reduce((a, o) => a + o.x.M, 0));
+    const revs = MONTHS.map((_, i) => budget(String(i + 1)).tot.Revenus).filter(v => v > 0);
+    const avgRev = revs.length ? revs.reduce((a, b) => a + b, 0) / revs.length : 0;
+    const rate = avgRev ? monthly / avgRev : 0;
+    const lastEnd = Math.max(...infos.map(o => o.x.projEnd));
+    const kpi = (lbl, val, sub, extra, cls) => h('div', { class: 'kpi' }, h('span', { class: 'lbl', text: lbl }), h('span', { class: 'val ' + (cls || ''), text: val }), h('span', { class: 'sub', text: sub }), extra);
+    const gauge = h('div', { class: 'gauge', role: 'img', 'aria-label': `Taux d'endettement ${pct.format(rate)} sur un plafond de 35 %` }, h('i', { style: `width:${Math.min(100, rate / 0.5 * 100)}%;background:${rate > 0.35 ? 'var(--bad)' : 'var(--accent)'}` }), h('b', { style: 'left:70%', title: 'Plafond conseillé 35 %' }));
+    const parts = [
+      h('p', { class: 'lede' }, `Il te reste `, h('b', { text: money(restTot) }), ` à rembourser sur ${infos.length} crédit${infos.length > 1 ? 's' : ''}, avec `, h('b', { text: money(monthly) }), ` de mensualités. ${restTot > 0 ? `Dernière échéance prévue en ${ymLabel(lastEnd)}.` : 'Tout est remboursé.'}`),
+      h('div', { class: 'kpis' },
+        kpi('Reste dû', money(restTot), 'capital + intérêts restants'),
+        kpi('Mensualités', money(monthly), 'par mois, crédits en cours'),
+        kpi('Taux d’endettement', pct.format(rate), `sur ${money(r2(avgRev))} de revenu mensuel moyen (${U.year}) · plafond 35 %`, gauge, rate > 0.35 ? 'neg' : ''),
+        kpi('Fin prévue', restTot > 0 ? ymLabel(lastEnd) : '—', restTot > 0 ? `dans ${lastEnd - infos[0].x.cur} mois` : 'aucune échéance restante'))
+    ];
+    const draws = [];
+    infos.forEach(({ l, x }, li) => {
+      const sub = [l.capital ? `${fmt0.format(l.capital)} empruntés` : '', l.rate ? `à ${num2.format(l.rate)} %` : '', l.months ? `sur ${l.months} mois` : '', `depuis ${ymLabel(x.start)}`].filter(Boolean).join(' · ');
+      const prog = x.total ? x.paid / x.total : 0;
+      const kv = (k, v, cls) => h('div', null, h('span', { text: k }), h('span', { class: 'num ' + (cls || ''), text: v }));
+      const nextIdx = x.byMonth.has(x.cur) ? x.cur + 1 : x.cur;
+      parts.push(h('div', { class: 'card', style: 'margin-top:12px', id: `loan-${l.id}` },
+        h('h2', { text: l.name }), h('p', { class: 'note', text: sub }),
+        h('div', { class: 'loan-grid' },
+          h('div', null, h('h3', { text: 'Avancement' }),
+            h('div', { class: 'donut-wrap' }, donut(prog, money(x.rest)),
+              h('div', { class: 'kv' },
+                kv('Remboursé', money(x.paid), 'pos'), kv('Reste dû', money(x.rest)),
+                kv('Échéances', x.M ? `${x.paidCount} / ${l.months || x.paidCount + x.left}` : '—'),
+                kv('Prochaine', x.rest > 0 ? ymLabel(nextIdx) : '—'),
+                kv('Fin prévue', x.rest > 0 ? ymLabel(x.projEnd) : 'terminé')))),
+          h('div', null, h('h3', { text: 'Coût du crédit' }),
+            costBar(l.capital, x.interest),
+            h('div', { class: 'kv', style: 'margin-top:10px' },
+              kv('Capital', money(l.capital)), kv('Intérêts', money(x.interest), 'neg'), kv('Coût total', money(x.total)),
+              kv('Intérêts déjà payés', x.sched.length ? `≈ ${money(x.interestPaid)}` : '—'), kv('Mensualité', money(x.M)))),
+          h('div', { style: 'grid-column:1/-1' }, h('h3', { text: 'Reste dû au fil du temps' }), h('p', { class: 'hint', style: 'margin:0 0 6px', text: 'Trait plein : remboursements saisis. Pointillés : projection avec la mensualité actuelle.' }), h('div', { class: 'chart', id: `ch-loan-${li}` })),
+          x.sched.length ? h('div', { style: 'grid-column:1/-1' }, h('h3', { text: 'Capital et intérêts par échéance' }), h('p', { class: 'hint', style: 'margin:0 0 6px', text: 'Tableau d’amortissement théorique : la part d’intérêts baisse à chaque échéance. Les échéances payées sont en couleur pleine.' }), h('div', { class: 'chart', id: `ch-amort-${li}` })) : null),
+        l.category ? null : h('p', { class: 'warn', text: 'Choisis la catégorie de factures de ce crédit dans Réglages pour compter les remboursements.' })));
+      draws.push(() => { drawLoanLine(`ch-loan-${li}`, x); if (x.sched.length) drawAmort(`ch-amort-${li}`, x); });
+    });
+    parts.push(h('div', { class: 'btnrow', style: 'margin-top:12px' }, h('button', { class: 'btn', type: 'button', text: 'Modifier mes crédits', onclick: () => { U.settingsFocus = 'loans'; showTab('reglages'); } })));
+    box.replaceChildren(...parts);
+    draws.forEach(f => f());
+  }
+  function donut(p, center) {
+    const R = 52, c = 66, sw = 14, L = 2 * Math.PI * R;
+    const svg = s('svg', { viewBox: '0 0 132 132', role: 'img', 'aria-label': `${pct.format(p)} remboursé` });
+    svg.append(s('circle', { cx: c, cy: c, r: R, fill: 'none', stroke: 'var(--sunk)', 'stroke-width': sw }));
+    svg.append(s('circle', { cx: c, cy: c, r: R, fill: 'none', stroke: 'var(--accent)', 'stroke-width': sw, 'stroke-linecap': p > 0 && p < 1 ? 'round' : 'butt', 'stroke-dasharray': `${L * Math.min(1, p)} ${L}`, transform: `rotate(-90 ${c} ${c})` }));
+    const t1 = s('text', { x: c, y: c + 2, 'text-anchor': 'middle', 'font-size': 24 }); t1.textContent = pct.format(Math.min(1, p)).replace(/\s/g, ' ');
+    const t2 = s('text', { x: c, y: c + 20, 'text-anchor': 'middle', 'font-size': 10, style: 'fill:var(--muted);font-family:var(--f-body)' }); t2.textContent = 'remboursé';
+    svg.append(t1, t2); return svg;
+  }
+  function costBar(capital, interest) {
+    const tot = capital + interest || 1;
+    return h('div', null, h('div', { class: 'alloc', role: 'img', 'aria-label': 'Capital et intérêts' },
+      h('i', { style: `width:${capital / tot * 100}%;background:var(--accent)`, title: `Capital ${money(capital)}` }),
+      h('i', { style: `width:${interest / tot * 100}%;background:var(--bad)`, title: `Intérêts ${money(interest)}` })),
+      h('div', { class: 'meter-legend' }, h('span', { text: `Capital ${pct.format(capital / tot)}` }), h('span', { text: `Intérêts ${pct.format(interest / tot)}` })));
+  }
+  function drawLoanLine(id, x) {
+    const box = $(id); if (!box) return; const W = box.clientWidth; if (!W) return;
+    const all = [...x.actual, ...x.projected];
+    let i0 = Math.min(x.start - 1, ...all.map(p => p.i)), i1 = Math.max(x.plannedEnd ?? 0, ...all.map(p => p.i));
+    if (i1 <= i0) i1 = i0 + 1;
+    const H = 220, m = { t: 14, r: 12, b: 26, l: 0 };
+    const top = Math.max(...all.map(p => p.v), 1), step = niceStep(top), hi = Math.ceil(top / step) * step;
+    const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'Reste dû au fil du temps' });
+    box.replaceChildren(svg);
+    const ticks = []; for (let v = 0; v <= hi + 1e-9; v += step) ticks.push(v);
+    m.l = measure(svg, ticks.map(v => fmt0.format(v))) + 8;
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const X = (i) => m.l + (i - i0) / (i1 - i0) * iw, Y = (v) => m.t + ih - v / hi * ih;
+    for (const v of ticks) { svg.append(s('line', { x1: m.l, x2: m.l + iw, y1: Y(v), y2: Y(v), stroke: 'var(--line)' })); const t = s('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end' }); t.textContent = fmt0.format(v); svg.append(t); }
+    const span = i1 - i0, every = Math.max(1, Math.ceil(span / Math.max(2, Math.floor(iw / 64))));
+    for (let i = i0; i <= i1; i += every) { const t = s('text', { x: X(i), y: H - 8, 'text-anchor': 'middle' }); t.textContent = ymLabel(i, true); svg.append(t); }
+    // zone remboursée
+    const a = x.actual;
+    svg.append(s('path', { d: a.map((p, k) => `${k ? 'L' : 'M'}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join('') + `L${X(a[a.length - 1].i)},${Y(0)}L${X(a[0].i)},${Y(0)}Z`, fill: 'var(--accent)', 'fill-opacity': 0.1 }));
+    svg.append(s('path', { d: a.map((p, k) => `${k ? 'L' : 'M'}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(''), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+    if (x.projected.length > 1) svg.append(s('path', { d: x.projected.map((p, k) => `${k ? 'L' : 'M'}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(''), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 2, 'stroke-dasharray': '5 5' }));
+    // aujourd'hui
+    if (x.cur >= i0 && x.cur <= i1) {
+      svg.append(s('line', { x1: X(x.cur), x2: X(x.cur), y1: m.t, y2: m.t + ih, stroke: 'var(--fg)', 'stroke-opacity': 0.35 }));
+      const t = s('text', { x: X(x.cur) + 4, y: m.t + 10, style: 'fill:var(--fg)' }); t.textContent = 'aujourd’hui'; svg.append(t);
+    }
+    const lp = a[a.length - 1]; svg.append(s('circle', { cx: X(lp.i), cy: Y(lp.v), r: 4, fill: 'var(--accent)' }));
+    const lab = s('text', { x: Math.min(X(lp.i) + 8, m.l + iw - 4), y: Y(lp.v) - 8, 'text-anchor': X(lp.i) + 120 > m.l + iw ? 'end' : 'start', style: 'fill:var(--fg);font-weight:600' }); lab.textContent = money(lp.v); svg.append(lab);
+    if (x.rest > 0) { const pe = x.projected[x.projected.length - 1]; svg.append(s('circle', { cx: X(pe.i), cy: Y(0), r: 3.5, fill: 'var(--muted)' })); const t = s('text', { x: X(pe.i), y: Y(0) - 8, 'text-anchor': 'end' }); t.textContent = `fin ${ymLabel(pe.i, true)}`; svg.append(t); }
+    const tip = tipFor(box);
+    const pts = [...a, ...x.projected.slice(1)];
+    const dot = s('circle', { r: 4, fill: 'var(--panel)', stroke: 'var(--fg)', 'stroke-width': 2, style: 'display:none' }); svg.append(dot);
+    const hit = s('rect', { x: m.l, y: m.t, width: iw, height: ih, fill: 'transparent' }); svg.append(hit);
+    hit.addEventListener('mousemove', (e) => {
+      const r = svg.getBoundingClientRect(), sc = r.width / W, i = Math.round(i0 + ((e.clientX - r.left) / sc - m.l) / iw * span);
+      const p = pts.reduce((b, q) => Math.abs(q.i - i) < Math.abs(b.i - i) ? q : b, pts[0]);
+      dot.setAttribute('cx', X(p.i)); dot.setAttribute('cy', Y(p.v)); dot.style.display = '';
+      const paidM = x.byMonth.get(p.i);
+      tip.replaceChildren(h('div', { class: 'h', text: `fin ${ymLabel(p.i)}${p.i > x.cur ? ' (projection)' : ''}` }), h('div', { text: `Reste dû ${money(p.v)}` }), paidM ? h('div', { class: 'h', text: `Payé ce mois-ci ${money(paidM)}` }) : null);
+      placeTip(box, tip, X(p.i) * sc, Y(p.v) * sc);
+    });
+    hit.addEventListener('mouseleave', () => { tip.hidden = true; dot.style.display = 'none'; });
+    box.append(tip);
+  }
+  function drawAmort(id, x) {
+    const box = $(id); if (!box) return; const W = box.clientWidth; if (!W) return;
+    let rows = x.sched.map(r => ({ ...r, label: ymLabel(r.i, true), paid: r.k <= x.paidCount }));
+    if (rows.length > 60) { // regroupement par année au-delà de 5 ans
+      const g = new Map(); for (const r of rows) { const y = ymOf(r.i).y; const o = g.get(y) || { label: String(y), interest: 0, capital: 0, paid: true, k: r.k }; o.interest += r.interest; o.capital += r.capital; o.paid = o.paid && r.paid; g.set(y, o); }
+      rows = [...g.values()];
+    }
+    const H = 200, m = { t: 10, r: 4, b: 26, l: 0 };
+    const top = Math.max(...rows.map(r => r.interest + r.capital)), step = niceStep(top), hi = Math.ceil(top / step) * step || 1;
+    const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'Capital et intérêts par échéance' });
+    box.replaceChildren(h('div', { class: 'legend' }, h('span', null, h('i', { class: 'sw', style: 'background:var(--accent)' }), 'Capital'), h('span', null, h('i', { class: 'sw', style: 'background:var(--bad)' }), 'Intérêts'), h('span', null, h('i', { class: 'sw', style: 'background:var(--sunk);outline:1px solid var(--line)' }), 'Échéances à venir (plus claires)')), svg);
+    const ticks = []; for (let v = 0; v <= hi + 1e-9; v += step) ticks.push(v);
+    m.l = measure(svg, ticks.map(v => fmt0.format(v))) + 8;
+    const iw = W - m.l - m.r, ih = H - m.t - m.b, n = rows.length, bw = iw / n, w = Math.max(1, Math.min(18, bw * 0.7));
+    const Y = (v) => m.t + ih - v / hi * ih;
+    for (const v of ticks) { svg.append(s('line', { x1: m.l, x2: m.l + iw, y1: Y(v), y2: Y(v), stroke: 'var(--line)' })); const t = s('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end' }); t.textContent = fmt0.format(v); svg.append(t); }
+    const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 56))));
+    const tip = tipFor(box);
+    rows.forEach((r, k) => {
+      const x0 = m.l + k * bw + (bw - w) / 2, op = r.paid ? 1 : 0.35;
+      svg.append(s('rect', { x: x0, y: Y(r.capital), width: w, height: Math.max(0.5, Y(0) - Y(r.capital)), fill: 'var(--accent)', 'fill-opacity': op }));
+      svg.append(s('rect', { x: x0, y: Y(r.capital + r.interest), width: w, height: Math.max(0.5, Y(r.capital) - Y(r.capital + r.interest)), fill: 'var(--bad)', 'fill-opacity': op }));
+      if (k % every === 0) { const t = s('text', { x: x0 + w / 2, y: H - 8, 'text-anchor': 'middle' }); t.textContent = r.label; svg.append(t); }
+      const hit = s('rect', { x: m.l + k * bw, y: m.t, width: bw, height: ih, fill: 'transparent' });
+      hit.addEventListener('mouseenter', () => { tip.replaceChildren(h('div', { class: 'h', text: `${n === x.sched.length ? `Échéance ${r.k} · ` : ''}${r.label}${r.paid ? ' · payée' : ''}` }), h('div', null, h('i', { class: 'sw', style: 'background:var(--accent)' }), `Capital ${money(r2(r.capital))}`), h('div', null, h('i', { class: 'sw', style: 'background:var(--bad)' }), `Intérêts ${money(r2(r.interest))}`)); placeTip(box, tip, x0 + w / 2, Y(r.capital + r.interest)); });
+      hit.addEventListener('mouseleave', () => tip.hidden = true); svg.append(hit);
+    });
+    box.append(tip);
+  }
+
   // ---------------------------------------------------------------- éditeurs partagés (accueil + réglages)
+  function localeOptions(cfg) {
+    let tags = LOCALE_TAGS; try { tags = Intl.NumberFormat.supportedLocalesOf(LOCALE_TAGS); } catch (e) {}
+    if (!tags.includes(cfg.locale)) tags = [cfg.locale, ...tags];
+    let rn = (x) => x, ln = (x) => x;
+    try { const r = new Intl.DisplayNames(['fr'], { type: 'region' }), l = new Intl.DisplayNames(['fr'], { type: 'language' }); rn = (x) => r.of(x) || x; ln = (x) => l.of(x) || x; } catch (e) {}
+    const byRegion = {}; for (const tag of tags) { const reg = tag.split('-').pop(); (byRegion[reg] = byRegion[reg] || []).push(tag); }
+    const items = tags.map(tag => {
+      const [lang, reg] = [tag.split('-')[0], tag.split('-').pop()];
+      let sample = '';
+      try { sample = new Intl.NumberFormat(tag, { style: 'currency', currency: cfg.currency }).format(-1234567.89); } catch (e) { sample = '?'; }
+      let date = ''; try { date = new Date(2026, 2, 31).toLocaleDateString(tag, { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch (e) {}
+      const country = rn(reg), langLabel = byRegion[reg].length > 1 ? ` (${ln(lang)})` : '';
+      return { tag, sort: country + langLabel, label: `${country}${langLabel} — ${sample} · ${date}` };
+    }).sort((a, b) => a.sort.localeCompare(b.sort, 'fr'));
+    return items.map(i => opt(i.tag, i.label, i.tag === cfg.locale));
+  }
   function generalFields(cfg, onChange) {
     const name = h('input', { type: 'text', id: 'g-name', value: cfg.appName, maxlength: 40 });
     name.addEventListener('change', () => { cfg.appName = name.value.trim() || 'Mon budget'; onChange(); });
-    const cur = h('select', { id: 'g-cur' }, ...CURRENCIES.map(([c, l]) => opt(c, `${c} · ${l}`, c === cfg.currency)));
-    if (!CURRENCIES.some(([c]) => c === cfg.currency)) cur.append(opt(cfg.currency, cfg.currency, true));
+    const cur = h('select', { id: 'g-cur' });
+    const curName = (() => { try { const dn = new Intl.DisplayNames(['fr'], { type: 'currency' }); return (c) => dn.of(c) || c; } catch (e) { return (c) => c; } })();
+    let allCur = FALLBACK_CURRENCIES; try { if (Intl.supportedValuesOf) allCur = Intl.supportedValuesOf('currency'); } catch (e) {}
+    const curLabel = (c) => { let sym = ''; try { sym = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: c, currencyDisplay: 'narrowSymbol' }).formatToParts(0).find(x => x.type === 'currency')?.value || ''; } catch (e) {} return `${c} · ${curName(c)}${sym && sym !== c ? ` (${sym})` : ''}`; };
+    cur.append(h('optgroup', { label: 'Courantes' }, ...COMMON_CURRENCIES.map(c => opt(c, curLabel(c), c === cfg.currency))),
+      h('optgroup', { label: 'Toutes les devises' }, ...allCur.filter(c => !COMMON_CURRENCIES.includes(c)).map(c => opt(c, curLabel(c), c === cfg.currency))));
     cur.addEventListener('change', () => { cfg.currency = cur.value; onChange(); });
-    const loc = h('select', { id: 'g-loc' }, ...LOCALES.map(([c, l]) => opt(c, l, c === cfg.locale)));
+    const loc = h('select', { id: 'g-loc' }, ...localeOptions(cfg));
     loc.addEventListener('change', () => { cfg.locale = loc.value; onChange(); });
     const yr = h('input', { type: 'number', id: 'g-year', min: 1990, max: 2100, value: cfg.year });
     yr.addEventListener('change', () => { const v = parseInt(yr.value, 10); if (v >= 1990 && v <= 2100) { cfg.year = v; onChange(); } });
-    const day = h('select', { id: 'g-day' }, ...Array.from({ length: 28 }, (_, i) => opt(String(i + 1), i === 0 ? '1er du mois' : `le ${i + 1}`, i + 1 === cfg.startDay)));
-    day.addEventListener('change', () => { cfg.startDay = +day.value; onChange(); });
+    if (!$('days-list')) document.body.append(h('datalist', { id: 'days-list' }, ...Array.from({ length: 28 }, (_, i) => opt(String(i + 1)))));
+    const day = h('input', { type: 'number', id: 'g-day', min: 1, max: 28, step: 1, inputmode: 'numeric', list: 'days-list', value: cfg.startDay, style: 'width:100%' });
+    const dayHint = h('span', { class: 'hint', text: cfg.startDay === 1 ? 'Du 1er à la fin du mois.' : `Du ${cfg.startDay} au ${cfg.startDay - 1} du mois suivant.` });
+    day.addEventListener('change', () => { const v = parseInt(day.value, 10); if (v >= 1 && v <= 28) { cfg.startDay = v; onChange(); } else { day.value = cfg.startDay; dayHint.textContent = 'Choisis un jour entre 1 et 28.'; } });
     const early = h('input', { type: 'checkbox', id: 'g-early', checked: cfg.startEarly });
     early.addEventListener('change', () => { cfg.startEarly = early.checked; onChange(); });
     return h('div', { class: 'fields' },
       h('label', { class: 'field' }, 'Nom de l’app', name),
       h('label', { class: 'field' }, 'Devise', cur),
-      h('label', { class: 'field' }, 'Format des nombres', loc),
+      h('label', { class: 'field', style: 'grid-column:span 2' }, 'Format des nombres et des dates', loc),
       h('label', { class: 'field' }, 'Année de départ', yr),
-      h('label', { class: 'field' }, 'Le mois budgétaire commence', day),
+      h('label', { class: 'field' }, 'Le mois budgétaire commence le (jour 1 à 28)', day, dayHint),
       cfg.startDay > 1 ? h('label', { class: 'field check' }, early, `Le ${cfg.startDay} appartient au mois suivant (ex. le ${cfg.startDay} décembre ouvre le budget de janvier)`) : null);
   }
 
@@ -803,7 +1348,7 @@
         l.monthly = r2(M); l.interest = r2(M * n - C); onChange();
       } });
       list.append(h('div', { class: 'card', style: 'padding:12px' },
-        h('div', { class: 'fields' }, txt('name', 'Nom'), h('label', { class: 'field' }, 'Catégorie de factures', cat), num('capital', 'Capital emprunté'), num('rate', 'Taux annuel (%)'), num('months', 'Durée (mois)', true), num('monthly', 'Mensualité'), num('interest', 'Total des intérêts'), num('paidBefore', 'Déjà remboursé avant le suivi')),
+        h('div', { class: 'fields' }, txt('name', 'Nom'), h('label', { class: 'field' }, 'Catégorie de factures', cat), num('capital', 'Capital emprunté'), num('rate', 'Taux annuel (%)'), num('months', 'Durée (mois)', true), num('monthly', 'Mensualité'), num('interest', 'Total des intérêts'), num('paidBefore', 'Déjà remboursé avant le suivi'), (() => { const el = h('input', { type: 'month', id: `loan-start-${l.id}`, value: l.startDate }); el.addEventListener('change', () => { if (/^\d{4}-\d{2}$/.test(el.value) || el.value === '') { l.startDate = el.value; onChange(); } }); return h('label', { class: 'field' }, 'Première échéance', el); })()),
         h('div', { class: 'btnrow', style: 'margin-top:10px' }, calc, h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer ce crédit', onclick: () => { cfg.loans.splice(i, 1); onChange(); } }))));
     });
     return h('div', null, cfg.loans.length ? list : h('p', { class: 'mut', text: 'Aucun crédit.' }),
@@ -978,7 +1523,7 @@
   // ---------------------------------------------------------------- accueil
   function renderOnboarding() {
     $('top').hidden = true; $('sampleBanner').hidden = true;
-    for (const t of ['apercu', 'transactions', 'previsionnel', 'epargne', 'reglages']) $('p-' + t).hidden = true;
+    for (const t of TABS) $('p-' + t).hidden = true;
     const p = $('p-onboarding'); p.hidden = false;
     if (!U.draft) U.draft = defaultCfg();
     const d = U.draft; applyLookDraft(d);
@@ -1022,6 +1567,7 @@
     U.period = U.year === tb.y ? String(tb.m) : '1';
     U.editing = null;
     resetForm();
+    autoPostRecurring();
   }
 
   function init() {
@@ -1054,7 +1600,7 @@
       } catch (e) { U.msg.data = 'Fichier CSV illisible : il faut au moins les colonnes Date et Montant.'; U.msg.dataBad = true; }
       render();
     });
-    let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (!S) return; if (U.tab === 'apercu') { drawMonths(); drawSplit(); } if (U.tab === 'epargne') drawEvo(); }, 120); }).observe(document.querySelector('.wrap'));
+    let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (!S) return; if (U.tab === 'apercu') { drawMonths(); drawSplit(); } if (U.tab === 'apercu') drawWorth(); if (U.tab === 'epargne') { drawEvo(); drawRate(); } if (U.tab === 'credits') renderCredits(); }, 120); }).observe(document.querySelector('.wrap'));
     matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => S && render());
     window.addEventListener('storage', (e) => { if (e.key === KEY) { S = load(); if (S) afterLoad(); render(); } });
 
@@ -1062,7 +1608,7 @@
     if (S) {
       afterLoad();
       const hash = location.hash.slice(1);
-      if (['apercu', 'transactions', 'previsionnel', 'epargne', 'reglages'].includes(hash)) U.tab = hash;
+      if (TABS.includes(hash)) U.tab = hash;
       setStatus('Enregistré sur cet appareil');
     }
     render();

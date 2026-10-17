@@ -47,3 +47,12 @@ Après avoir modifié un fichier, change la valeur `VERSION` en haut de `sw.js` 
 ## Partager l'app
 
 Partage simplement l'adresse : chaque personne démarre avec un budget vierge (ou les données d'exemple) et ne voit jamais les données des autres.
+
+## Nouveautés v1.1
+
+- **Opérations récurrentes** (onglet Transactions) : définis tes factures, salaire et virements une fois, puis reporte-les chaque mois en un clic. L'app propose aussi celles qu'elle repère dans ton historique, et peut les reporter automatiquement au début du mois.
+- **Onglet Crédits** : avancement, coût du crédit, reste dû au fil du temps avec projection, tableau d'amortissement.
+- **Aperçu enrichi** : alertes, évolution par rapport au mois précédent, rythme des dépenses (reste par jour), répartition des revenus, patrimoine, plus grosses dépenses.
+- **Épargne** : taux d'épargne mois par mois.
+- **Réglages** : jour de début du mois saisissable, tous les formats de nombres et toutes les devises avec un aperçu.
+- **Thème sombre** en noir et gris neutres.

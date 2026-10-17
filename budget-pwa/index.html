@@ -6,7 +6,7 @@
 <title>Budget</title>
 <meta name="description" content="Suivi de budget personnel : comptes, transactions, prévisionnel, épargne et crédits. Fonctionne hors ligne, données gardées sur l'appareil.">
 <meta name="theme-color" content="#F3F5F1" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#111613" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0F0F10" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -31,7 +31,8 @@
       <button role="tab" data-tab="apercu" aria-selected="true">Aperçu</button>
       <button role="tab" data-tab="transactions" aria-selected="false">Transactions</button>
       <button role="tab" data-tab="previsionnel" aria-selected="false">Prévisionnel</button>
-      <button role="tab" data-tab="epargne" aria-selected="false">Épargne &amp; crédits</button>
+      <button role="tab" data-tab="epargne" aria-selected="false">Épargne</button>
+      <button role="tab" data-tab="credits" aria-selected="false">Crédits</button>
       <button role="tab" data-tab="reglages" aria-selected="false">Réglages</button>
     </nav>
   </header>
@@ -46,8 +47,24 @@
 
     <section id="p-apercu" hidden>
       <p class="lede" id="lede"></p>
+      <div class="alerts" id="alerts"></div>
       <div class="kpis" id="kpis"></div>
       <div class="grid">
+        <div class="card" id="c-pace">
+          <h2>Budget dépenses</h2>
+          <p class="note" id="pace-note">Dépenses variables face au prévu, et ce qu'il te reste pour finir le mois.</p>
+          <div id="pace"></div>
+        </div>
+        <div class="card" id="c-alloc">
+          <h2>Répartition des revenus</h2>
+          <p class="note">Ce que deviennent tes revenus de la période.</p>
+          <div id="alloc"></div>
+        </div>
+        <div class="card">
+          <h2>Plus grosses dépenses</h2>
+          <p class="note" id="top-note"></p>
+          <div id="top-spend"></div>
+        </div>
         <div class="card span">
           <h2>Mois par mois</h2>
           <p class="note">Revenus, sorties (factures + dépenses) et épargne de chaque mois. Touche un mois pour l'afficher.</p>
@@ -58,6 +75,11 @@
           <h2>Soldes des comptes</h2>
           <p class="note">Réel = transactions pointées. À venir = toutes les transactions saisies.</p>
           <div id="accounts"></div>
+        </div>
+        <div class="card">
+          <h2>Patrimoine</h2>
+          <p class="note" id="worth-note">Total de tes comptes à la fin de chaque mois, et ce qu'il reste une fois les crédits déduits.</p>
+          <div class="chart" id="ch-worth"></div>
         </div>
         <div class="card">
           <h2>Où part l'argent</h2>
@@ -73,6 +95,7 @@
     </section>
 
     <section id="p-transactions" hidden>
+      <div class="card" id="c-recur" style="margin-top:16px"></div>
       <div class="tx-layout">
         <div class="card" id="c-form">
           <h2 id="form-title">Nouvelle transaction</h2>
@@ -126,12 +149,14 @@
           <div class="chart" id="ch-evo"></div>
         </div>
         <div class="card">
-          <h2>Crédits &amp; dettes</h2>
-          <p class="note">Remboursé = mensualités saisies en factures sur la catégorie du crédit.</p>
-          <div id="loans"></div>
+          <h2>Taux d'épargne par mois</h2>
+          <p class="note">Part des revenus mise de côté (épargnes − reprises). La ligne marque 20 %.</p>
+          <div class="chart" id="ch-rate"></div>
         </div>
       </div>
     </section>
+
+    <section id="p-credits" hidden></section>
 
     <section id="p-reglages" hidden></section>
   </main>
