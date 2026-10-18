@@ -10,7 +10,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '2.1.0';
+  const APP_VERSION = '2.2.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -432,6 +432,17 @@
     const curAcc = new Set((S.cfg.accounts.some(a => a.current) ? S.cfg.accounts.filter(a => a.current) : S.cfg.accounts.filter(a => !a.savings)).map(a => a.name));
     const sign = (x) => curAcc.has(x.to) && !curAcc.has(x.from) ? 1 : curAcc.has(x.from) && !curAcc.has(x.to) ? -1 : 0;
     const items = [];
+    const nb = bm(today);
+    if (tb.y * 12 + tb.m < nb.y * 12 + nb.m) {
+      // mois passé : ce qui est réellement passé, sans les petites dépenses du quotidien
+      for (const t of S.tx) {
+        if (t.type === 'Dépenses') continue;
+        const b = bm(t.date); if (b.y !== tb.y || b.m !== tb.m) continue;
+        const s = sign(t); if (!s) continue;
+        items.push({ date: t.date, label: t.description || t.category, amount: s * t.amount, x: t, state: 'done' });
+      }
+      return { items, pay: null };
+    }
     for (const st of recurStatus(tb.y, tb.m)) {
       const s = sign(st.r); if (!s) continue;
       items.push({ date: st.date, label: st.r.label || st.r.category, amount: s * st.r.amount, x: { ...st.r, description: st.r.label }, state: st.done ? 'done' : st.skipped ? 'skip' : 'plan' });
@@ -484,7 +495,7 @@
     let line;
     if (!isNow) {
       const inn = items.filter(i => i.amount > 0).reduce((s, i) => s + i.amount, 0), out = items.filter(i => i.amount < 0).reduce((s, i) => s + i.amount, 0);
-      line = items.length ? [h('b', { class: 'c-in-t', text: `+${money(inn)}` }), ' et ', h('b', { class: 'c-out-t', text: `−${money(-out)}` }), tb.y * 12 + tb.m > now.y * 12 + now.m ? ' prévus sur tes comptes courants ce mois-là.' : ' passés par tes comptes courants ce mois-là.'] : ['Rien de prévu ce mois-là pour l’instant.'];
+      line = items.length ? [h('b', { class: 'c-in-t', text: `+${money(inn)}` }), ' et ', h('b', { class: 'c-out-t', text: `−${money(-out)}` }), tb.y * 12 + tb.m > now.y * 12 + now.m ? ' prévus sur tes comptes courants ce mois-là.' : ' de revenus, factures et virements ce mois-là (hors dépenses du quotidien).'] : [tb.y * 12 + tb.m > now.y * 12 + now.m ? 'Rien de prévu ce mois-là pour l’instant.' : 'Aucun mouvement enregistré ce mois-là.'];
     } else if (pay) {
       const dn = Math.max(1, Math.round((new Date(pay.date + 'T00:00:00') - new Date(today + 'T00:00:00')) / 864e5));
       const when = new Date(pay.date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
@@ -497,7 +508,7 @@
       h('div', { class: 'cal-top' }, h('span', { class: 'cal-head' }, nav(-1), h('span', { class: 'cal-title', text: title.charAt(0).toUpperCase() + title.slice(1) }), nav(1), !isNow ? h('button', { type: 'button', class: 'linkbtn cal-today', text: 'Aujourd’hui', onclick: () => transition(() => { const n = bm(todayStr()); U.period = String(n.m); U.year = n.y; U.calDay = null; render(); }) }) : null),
         isNow && upcoming.length ? h('span', { class: 'cal-sum hint', text: `${sgn(r2(upcoming.reduce((s, i) => s + i.amount, 0)))} à venir` }) : null),
       grid, detail || '', h('p', { class: 'cal-line' }, ...line),
-      !S.cfg.recurring.length ? h('p', { class: 'hint cal-tip' }, 'Ajoute tes récurrentes pour voir tes échéances ici. ', h('button', { class: 'linkbtn', type: 'button', text: 'Les ajouter', onclick: () => { U.sub.transactions = 'recur'; showTab('transactions'); } })) : '');
+      !S.cfg.recurring.length && isNow ? h('p', { class: 'hint cal-tip' }, 'Ajoute tes récurrentes pour voir tes échéances ici. ', h('button', { class: 'linkbtn', type: 'button', text: 'Les ajouter', onclick: () => { U.sub.transactions = 'recur'; showTab('transactions'); } })) : '');
   }
   // ---------------------------------------------------------------- aperçu
   function prevPeriod() {
@@ -543,7 +554,57 @@
       spend: Math.max(0, r2(plannedTotal('Dépenses', p, y) - b.tot['Dépenses']))
     };
   }
+  /** Accueil d'un autre mois que le mois en cours : solde réel en fin de mois (passé) ou projection (futur). */
+  function renderMonthEndHero(box, sel, nowb) {
+    const cur = S.cfg.accounts.filter(a => a.current);
+    const list = cur.length ? cur : S.cfg.accounts.filter(a => !a.savings);
+    const names = new Set(list.map(a => a.name));
+    const [st, en] = monthRange(sel.y, sel.m);
+    const endIso = isoOf(en), startIso = isoOf(new Date(st.getTime() - 864e5));
+    const balAt = (iso) => { const m = {}; for (const a of list) m[a.name] = a.start; for (const t of S.tx) { if (t.date > iso) continue; if (names.has(t.from)) m[t.from] -= t.amount; if (names.has(t.to)) m[t.to] += t.amount; } for (const k in m) m[k] = r2(m[k]); return m; };
+    const deMois = (m) => (/^[aeiouy]/i.test(MONTHS[m - 1]) ? 'd’' : 'de ') + MONTHS[m - 1].toLowerCase();
+    const lbl = `${MONTHS[sel.m - 1].toLowerCase()} ${sel.y}`;
+    const back = h('button', { class: 'btn small', type: 'button', text: 'Revenir à aujourd’hui', onclick: () => transition(() => { U.period = String(nowb.m); U.year = nowb.y; U.calDay = null; render(); }, sel.y * 12 + sel.m > nowb.y * 12 + nowb.m ? 'back' : 'fwd') });
+    if (sel.y * 12 + sel.m < nowb.y * 12 + nowb.m) {
+      const end = balAt(endIso), before = balAt(startIso);
+      const tot = r2(list.reduce((s, a) => s + end[a.name], 0)), tot0 = r2(list.reduce((s, a) => s + before[a.name], 0));
+      box.append(h('div', { class: 'hero-label', text: `Sur tes comptes courants, fin ${lbl}` }),
+        h('div', { class: 'hero-num num' + (tot < 0 ? ' neg' : '') }, moneyEl(tot)));
+      box.append(h('div', { class: 'acc-chips' }, ...list.map(a => { const v = end[a.name], d = r2(v - before[a.name]);
+        return h('div', { class: 'acc-chip' + (v < 0 ? ' low' : ''), style: `--ac:${a.color}` }, h('span', { class: 'acc-name' }, h('i', { class: 'tok', 'aria-hidden': 'true' }), a.name),
+          h('span', { class: 'acc-val num' + (v < 0 ? ' neg' : '') }, moneyEl(v)), h('span', { class: 'acc-sub ' + (d > 0 ? 'c-in-t' : d < 0 ? 'c-out-t' : ''), text: `${sgn(d)} sur le mois` })); })));
+      const d = r2(tot - tot0);
+      box.append(h('p', { class: 'hero-text' }, d >= 0 ? ['Tes comptes courants ont pris ', h('b', { class: 'c-in-t', text: money(d) }), ` en ${MONTHS[sel.m - 1].toLowerCase()}.`] : ['Tes comptes courants ont perdu ', h('b', { class: 'c-out-t', text: money(-d) }), ` en ${MONTHS[sel.m - 1].toLowerCase()}.`]),
+        h('div', { class: 'hero-acts' }, back));
+      return;
+    }
+    // projection : fin du mois en cours, puis prévisionnel (ou moyenne de tes 3 derniers mois) mois après mois
+    const { fut } = balances();
+    const totFut = r2(list.reduce((s, a) => s + fut[a.name], 0));
+    const rm = remainingThisMonth();
+    let proj = r2(totFut + rm.income - rm.bills - rm.savings - rm.spend);
+    const steps = [{ y: nowb.y, m: nowb.m, net: r2(proj - totFut), src: 'reste du mois', bal: proj }];
+    const ci = mIdx(nowb.y, nowb.m);
+    const avg = (() => { let s = 0; for (let k = 1; k <= 3; k++) { const { y, m } = ymOf(ci - k); const t = budget(String(m), y).tot; s += t.Revenus - t.Factures - t['Dépenses'] - (t['Épargnes'] - t.reprises); } return r2(s / 3); })();
+    for (let i = ci + 1; i <= mIdx(sel.y, sel.m); i++) {
+      const { y, m } = ymOf(i), p = (g) => plannedTotal(g, String(m), y);
+      const rev = p('Revenus'), out = p('Factures') + p('Dépenses') + p('Épargnes');
+      const has = rev || out, net = has ? r2(rev - out) : avg;
+      proj = r2(proj + net); steps.push({ y, m, net, src: has ? 'prévisionnel' : 'moyenne 3 mois', bal: proj });
+    }
+    const usesAvg = steps.some(s => s.src === 'moyenne 3 mois');
+    box.append(h('div', { class: 'hero-label', text: `Projection sur tes comptes courants, fin ${lbl}` }),
+      h('div', { class: 'hero-num num proj' + (proj < 0 ? ' neg' : '') }, moneyEl(proj)));
+    const delta = r2(proj - totFut);
+    box.append(h('p', { class: 'hero-text' }, `D’ici là, `, delta >= 0 ? ['tes comptes courants gagneraient ', h('b', { class: 'c-in-t', text: money(delta) })] : ['tes comptes courants perdraient ', h('b', { class: 'c-out-t', text: money(-delta) })], usesAvg ? ', d’après ton prévisionnel et tes habitudes.' : ', si ton prévisionnel est respecté.'),
+      h('details', { class: 'hero-det', open: !!U.projOpen, ontoggle: (e) => { U.projOpen = e.target.open; } }, h('summary', { text: 'Mois par mois' }),
+        h('ul', { class: 'proj-list' }, h('li', null, h('span', { class: 'det-c', text: 'Aujourd’hui' }), h('span'), h('span', { class: 'num', text: money(totFut) })),
+          ...steps.map(s => h('li', null, h('span', { class: 'det-c', text: `Fin ${MONTHS[s.m - 1].toLowerCase()} ${s.y}` }), h('span', { class: 'num ' + (s.net >= 0 ? 'c-in-t' : 'c-out-t'), text: sgn(s.net) }), h('span', { class: 'num' + (s.bal < 0 ? ' neg' : ''), text: money(s.bal) })))),
+        h('p', { class: 'hint', text: `Ce mois-ci : solde actuel, plus ce qui doit encore entrer, moins les factures, l’épargne et le budget dépenses restants. Ensuite : ton prévisionnel de chaque mois${usesAvg ? `, ou ta moyenne des 3 derniers mois (${sgn(avg)}) quand il est vide` : ''}.` })),
+      h('div', { class: 'hero-acts' }, back));
+  }
   function renderCashHero(box) {
+    { const sel = calYm(), nowb = bm(todayStr()); if (sel.y !== nowb.y || sel.m !== nowb.m) { renderMonthEndHero(box, sel, nowb); return; } }
     const { real, fut } = balances();
     const cur = S.cfg.accounts.filter(a => a.current);
     const list = cur.length ? cur : S.cfg.accounts.filter(a => !a.savings);

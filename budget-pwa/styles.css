@@ -1079,3 +1079,43 @@ input.wz-amt{width:180px;min-height:60px;text-align:center;font-family:var(--f-d
 }
 .bil-row.nob{grid-template-columns:minmax(0,1fr) auto}
 .bil-g summary .num{font-weight:600}
+
+/* ================================================================ v2.2 — iPhone : aucun débordement, barre d'onglets contrastée, accueil par mois */
+html,body{overflow-x:clip;max-width:100%}
+main,.wrap{min-width:0}
+.hero-acts{margin-top:12px}
+.hero-num.proj{color:color-mix(in srgb,var(--fg) 82%,var(--accent))}
+.hero-num.proj .mny .mj{font-style:normal}
+.proj-list li{grid-template-columns:minmax(0,1fr) auto auto!important;gap:14px!important}
+.proj-list .num{text-align:right;min-width:72px}
+.t-line .chip{flex:none}
+.bil-head,.bil-sel{flex-wrap:wrap}
+.bil-sel select{min-width:0;max-width:100%}
+.loan-grid,.loan-grid>div,.donut-wrap{min-width:0}
+.kv{min-width:0}
+.btnrow{flex-wrap:wrap}
+.btnrow .btn{white-space:normal}
+
+/* barre d'onglets : verre sombre, bien lisible sur fond clair */
+@media (max-width:700px){
+  nav.tabs{background:rgba(20,30,40,.82);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 0 .5px rgba(0,0,0,.35),0 14px 34px -10px rgba(10,20,30,.55)}
+  nav.tabs button{color:rgba(235,241,246,.62)}
+  nav.tabs button[aria-selected=true]{color:#fff;background:rgba(255,255,255,.16)}
+  .sugg-row .desc,.rec-what .desc{white-space:normal}
+  .acc-chips{margin-left:-16px;margin-right:-16px}
+}
+@media (max-width:700px) and (prefers-color-scheme: dark){:root:not([data-theme="light"]) nav.tabs{background:rgba(30,42,54,.78)}}
+@media (max-width:700px){:root[data-theme="dark"] nav.tabs{background:rgba(30,42,54,.78)}}
+@media (max-width:360px){
+  .wrap{padding-left:12px;padding-right:12px}
+  .hero-num{font-size:46px}
+  .kpis-3 .kpi .val{font-size:15px}
+  nav.tabs{left:8px;right:8px}
+  nav.tabs button{font-size:9.5px}
+  .period-step{grid-template-columns:34px 1fr auto 34px}
+  .step-btn{width:34px;height:34px}
+}
+@media (max-width:700px){.acc-chips{margin-left:0;margin-right:0;padding-left:0;padding-right:0}}
+@media (max-width:360px){header.top{margin-inline:-12px;padding-left:12px;padding-right:12px}}
+@media (max-width:420px){.loan-grid{grid-template-columns:minmax(0,1fr)!important}.donut-wrap{flex-wrap:wrap}}
+.donut-wrap .kv{flex:1 1 180px}
