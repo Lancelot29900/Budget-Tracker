@@ -10,7 +10,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '2.2.0';
+  const APP_VERSION = '2.3.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -106,7 +106,7 @@
     { const i = OLD_DEFAULT_ACCENTS.indexOf(String(cfg.accent).toUpperCase()); if (i >= 0) cfg.accent = ACCENTS[[0, 0, 1, 0, 3, 4, 5, 0][i]][1]; }
     cfg.startDay = Math.min(28, Math.max(1, parseInt(cfg.startDay, 10) || 1));
     cfg.year = parseInt(cfg.year, 10) || d.year;
-    cfg.accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).filter(a => a && a.name && a.name !== 'Externe').map(a => ({ id: a.id || uid(), name: String(a.name), start: r2(a.start), savings: !!a.savings, current: a.savings ? false : (a.current === undefined ? true : !!a.current), color: /^#[0-9a-f]{6}$/i.test(a.color || '') ? a.color : '' }));
+    cfg.accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).filter(a => a && a.name && a.name !== 'Externe').map(a => ({ id: a.id || uid(), name: String(a.name), start: r2(a.start), savings: !!a.savings, current: a.savings ? false : (a.current === undefined ? true : !!a.current), ...(/^\d{4}-\d{2}-\d{2}$/.test(a.closed || '') ? { closed: a.closed } : {}), color: /^#[0-9a-f]{6}$/i.test(a.color || '') ? a.color : '' }));
     cfg.accounts.forEach((a, i) => { const o = OLD_ACC_COLORS.indexOf(String(a.color).toUpperCase()); if (o >= 0) a.color = ACC_COLORS[o]; if (!a.color) a.color = ACC_COLORS[i % ACC_COLORS.length]; });
     const cats = {};
     for (const g of CAT_GROUPS) cats[g] = Array.isArray(cfg.categories?.[g]) ? [...new Set(cfg.categories[g].map(String).filter(Boolean))] : clone(DEFAULT_CATS[g]);
@@ -189,12 +189,13 @@
   const dfmt = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
   const inPeriod = (t, p = U.period, y = U.year) => { const b = bm(t.date); return b.y === y && (p === 'year' || b.m === +p); };
   const periodLabel = (p = U.period) => p === 'year' ? `l'année ${U.year}` : `${MONTHS[+p - 1].toLowerCase()} ${U.year}`;
-  const accNames = () => S.cfg.accounts.map(a => a.name);
+  const accNames = () => S.cfg.accounts.filter(a => !a.closed).map(a => a.name);
+  const allAccNames = () => S.cfg.accounts.map(a => a.name);
   const accColor = (name) => S.cfg.accounts.find(a => a.name === name)?.color || 'var(--muted)';
   const accPill = (name) => h('span', { class: 'acc-pill' + (name === 'Externe' ? ' ext' : ''), style: name === 'Externe' ? null : `--ac:${accColor(name)}` }, h('i', { class: 'tok', 'aria-hidden': 'true' }), name);
   const nextAccColor = (cfg) => ACC_COLORS.find(c => !cfg.accounts.some(a => a.color === c)) || ACC_COLORS[cfg.accounts.length % ACC_COLORS.length];
-  const savingsAccs = () => S.cfg.accounts.filter(a => a.savings).map(a => a.name);
-  const mainAcc = () => (S.cfg.accounts.find(a => !a.savings) || S.cfg.accounts[0] || { name: 'Externe' }).name;
+  const savingsAccs = () => S.cfg.accounts.filter(a => a.savings && !a.closed).map(a => a.name);
+  const mainAcc = () => (S.cfg.accounts.find(a => !a.savings && !a.closed) || S.cfg.accounts.find(a => !a.closed) || { name: 'Externe' }).name;
 
   function catsFor(type, cfg = S.cfg) {
     const c = cfg.categories;
@@ -244,11 +245,14 @@
   }
   const plannedTotal = (group, p = U.period, y = U.year) => r2(S.cfg.categories[group].reduce((a, c) => a + planned(group, c, p, y), 0));
 
-  function balances() {
+  /** Soldes réels (pointé) et « à venir » : les opérations non pointées comptent seulement jusqu'à la fin du mois en cours,
+      pour que les récurrentes déjà reportées sur les mois suivants ne faussent pas le mois actuel. */
+  function balances(until) {
     const real = {}, fut = {};
+    const lim = until || (() => { const b = bm(todayStr()); return isoOf(monthRange(b.y, b.m)[1]); })();
     for (const a of S.cfg.accounts) { real[a.name] = a.start; fut[a.name] = a.start; }
     for (const t of S.tx) {
-      for (const [b, ok] of [[real, t.pointed], [fut, true]]) {
+      for (const [b, ok] of [[real, t.pointed], [fut, t.pointed || t.date <= lim]]) {
         if (!ok) continue;
         if (t.from in b) b[t.from] -= t.amount;
         if (t.to in b) b[t.to] += t.amount;
@@ -429,7 +433,7 @@
   function calYm() { const tb = bm(todayStr()); if (U.period === 'year') return U.year === tb.y ? tb : { y: U.year, m: 1 }; return { y: U.year, m: +U.period }; }
   function monthItems() {
     const today = todayStr(), tb = calYm();
-    const curAcc = new Set((S.cfg.accounts.some(a => a.current) ? S.cfg.accounts.filter(a => a.current) : S.cfg.accounts.filter(a => !a.savings)).map(a => a.name));
+    const curAcc = new Set((S.cfg.accounts.some(a => a.current) ? S.cfg.accounts.filter(a => a.current && !a.closed) : S.cfg.accounts.filter(a => !a.savings && !a.closed)).map(a => a.name));
     const sign = (x) => curAcc.has(x.to) && !curAcc.has(x.from) ? 1 : curAcc.has(x.from) && !curAcc.has(x.to) ? -1 : 0;
     const items = [];
     const nb = bm(today);
@@ -556,8 +560,8 @@
   }
   /** Accueil d'un autre mois que le mois en cours : solde réel en fin de mois (passé) ou projection (futur). */
   function renderMonthEndHero(box, sel, nowb) {
-    const cur = S.cfg.accounts.filter(a => a.current);
-    const list = cur.length ? cur : S.cfg.accounts.filter(a => !a.savings);
+    const cur = S.cfg.accounts.filter(a => a.current && !a.closed);
+    const list = cur.length ? cur : S.cfg.accounts.filter(a => !a.savings && !a.closed);
     const names = new Set(list.map(a => a.name));
     const [st, en] = monthRange(sel.y, sel.m);
     const endIso = isoOf(en), startIso = isoOf(new Date(st.getTime() - 864e5));
@@ -606,8 +610,8 @@
   function renderCashHero(box) {
     { const sel = calYm(), nowb = bm(todayStr()); if (sel.y !== nowb.y || sel.m !== nowb.m) { renderMonthEndHero(box, sel, nowb); return; } }
     const { real, fut } = balances();
-    const cur = S.cfg.accounts.filter(a => a.current);
-    const list = cur.length ? cur : S.cfg.accounts.filter(a => !a.savings);
+    const cur = S.cfg.accounts.filter(a => a.current && !a.closed);
+    const list = cur.length ? cur : S.cfg.accounts.filter(a => !a.savings && !a.closed);
     const totReal = r2(list.reduce((s, a) => s + real[a.name], 0));
     const totFut = r2(list.reduce((s, a) => s + fut[a.name], 0));
     const now = new Date();
@@ -718,7 +722,7 @@
     const acc = h('div', { class: 'acc' }, h('span', { class: 'h', text: 'Compte' }), h('span', { class: 'h', style: 'text-align:right', text: 'Réel' }), h('span', { class: 'h', style: 'text-align:right', text: 'À venir' }));
     const row = (name, a, f, cls) => [h('span', { class: cls || '', text: name }), h('span', { class: 'num ' + (cls || '') + (a < 0 ? ' neg' : ''), style: 'text-align:right', text: money(a) }), h('span', { class: 'num mut ' + (cls || ''), style: 'text-align:right', text: money(f) })];
     let tr = 0, tf = 0;
-    for (const [label, list] of [['Comptes courants', S.cfg.accounts.filter(a => a.current)], ['Épargne', S.cfg.accounts.filter(a => a.savings)], ['Autres comptes', S.cfg.accounts.filter(a => !a.current && !a.savings)]]) {
+    for (const [label, list] of [['Comptes courants', S.cfg.accounts.filter(a => a.current && !a.closed)], ['Épargne', S.cfg.accounts.filter(a => a.savings && !a.closed)], ['Autres comptes', S.cfg.accounts.filter(a => !a.current && !a.savings)]]) {
       if (!list.length) continue;
       acc.append(h('span', { class: 'sec', text: label }));
       for (const a of list) { acc.append(...row(a.name, real[a.name], fut[a.name])); tr += real[a.name]; tf += fut[a.name]; }
@@ -807,7 +811,7 @@
     const last = lastActiveMonth(U.year), pts = [];
     const sorted = S.tx.map(t => ({ t, b: bm(t.date) })).map(x => ({ ...x, i: mIdx(x.b.y, x.b.m) }));
     const startBal = S.cfg.accounts.reduce((a, x) => a + x.start, 0);
-    const accSet = new Set(accNames());
+    const accSet = new Set(allAccNames());
     for (let m = 1; m <= last; m++) {
       const lim = mIdx(U.year, m); let assets = startBal, debt = 0;
       for (const { t, i } of sorted) if (i <= lim) { if (accSet.has(t.from)) assets -= t.amount; if (accSet.has(t.to)) assets += t.amount; }
@@ -946,9 +950,11 @@
     if (values.includes(cur)) sel.value = cur;
   }
   function refreshFormOptions() {
-    { const cur = $('fa').value; $('fa').replaceChildren(opt('', 'Tous les comptes'), ...accNames().map(n => opt(n, n, n === cur))); }
+    { const cur = $('fa').value; $('fa').replaceChildren(opt('', 'Tous les comptes'), ...S.cfg.accounts.map(a => opt(a.name, a.closed ? `${a.name} (clôturé)` : a.name, a.name === cur))); }
     fillSelect($('f-cat'), catsFor($('f-type').value));
-    const accs = ['Externe', ...accNames()];
+    const ed = U.editing && S.tx.find(t => t.id === U.editing);
+    const extra = ed ? [ed.from, ed.to].filter(n => n !== 'Externe' && !accNames().includes(n)) : [];
+    const accs = ['Externe', ...accNames(), ...new Set(extra)];
     fillSelect($('f-from'), accs); fillSelect($('f-to'), accs);
   }
   function goalAccount(cat) { return S.cfg.goals.find(g => g.category === cat)?.account || savingsAccs()[0] || mainAcc(); }
@@ -1018,7 +1024,7 @@
   }
   function renderList() {
     const q = $('q').value.trim().toLowerCase(), ft = $('ft').value, fp = $('fp').value;
-    const fa = accNames().includes($('fa').value) ? $('fa').value : '';
+    const fa = allAccNames().includes($('fa').value) ? $('fa').value : '';
     let rows = S.tx.filter(t => inPeriod(t));
     if (fa) rows = rows.filter(t => t.from === fa || t.to === fa);
     // solde du compte après chaque opération (toutes dates, pointées ou non)
@@ -1875,7 +1881,7 @@
   // ---------------------------------------------------------------- épargne & crédits
   function renderEpargne() {
     const { fut } = balances();
-    const accs = S.cfg.accounts.filter(a => a.savings);
+    const accs = S.cfg.accounts.filter(a => a.savings && !a.closed);
     const total = r2(accs.reduce((s, a) => s + Math.max(0, fut[a.name]), 0));
     const sv = savingsByCat();
     const tb = bm(todayStr()), cur = mIdx(tb.y, tb.m);
@@ -2220,17 +2226,48 @@
       col.addEventListener('change', () => { a.color = col.value; onChange(); });
       const move = (d) => { const j = i + d; if (j < 0 || j >= cfg.accounts.length) return; [cfg.accounts[i], cfg.accounts[j]] = [cfg.accounts[j], cfg.accounts[i]]; onChange(); };
       const removeAcc = () => { cfg.accounts.splice(i, 1); cfg.goals.forEach(g => { if (g.account === a.name) g.account = ''; }); U.delAcc = null; onChange(); };
-      const del = h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', onclick: () => { if (!used && a.start === 0) removeAcc(); else { U.delAcc = a.id; onChange(); } } });
+      const del = h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', onclick: () => { if (!used && a.start === 0) removeAcc(); else { U.delAcc = a.id; U.closeAcc = null; onChange(); } } });
+      const clo = withData ? (a.closed
+        ? h('button', { class: 'btn small', type: 'button', text: 'Rouvrir', title: 'Le compte réapparaît dans les listes', onclick: () => { delete a.closed; onChange(); } })
+        : h('button', { class: 'btn small', type: 'button', text: 'Clôturer', title: 'Garder l’historique mais retirer le compte des listes', onclick: () => { U.closeAcc = a.id; U.delAcc = null; onChange(); } })) : null;
       tb.append(h('tr', { class: 'acc-edit-row' },
         h('td', { class: 'acc-col-cell' }, col),
-        h('td', null, name, msg, used ? h('div', { class: 'hint', text: `${used} transaction${used > 1 ? 's' : ''}` }) : null),
+        h('td', null, name, msg, a.closed ? h('div', { class: 'hint', text: `Clôturé le ${a.closed.split('-').reverse().join('/')}` }) : null, used ? h('div', { class: 'hint', text: `${used} transaction${used > 1 ? 's' : ''}` }) : null),
         h('td', { class: 'r acc-start' }, h('span', { class: 'm-lbl', text: 'Solde de départ' }), start),
         h('td', { class: 'acc-flag' }, h('label', null, curr, h('span', { class: 'm-lbl', text: 'Courant' }))),
         h('td', { class: 'acc-flag' }, h('label', null, sav, h('span', { class: 'm-lbl', text: 'Épargne' }))),
         h('td', null, h('div', { class: 'acts' },
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Monter', text: '↑', disabled: i === 0, onclick: () => move(-1) }),
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Descendre', text: '↓', disabled: i === cfg.accounts.length - 1, onclick: () => move(1) }),
-          del))));
+          clo, del))));
+      if (a.closed) tb.lastChild.classList.add('acc-closed');
+      if (U.closeAcc === a.id && withData) {
+        const others = cfg.accounts.filter(o => o !== a && !o.closed);
+        const date = h('input', { type: 'date', value: todayStr(), 'aria-label': 'Date de clôture' });
+        const dest = h('select', { 'aria-label': 'Compte qui récupère le solde' }, ...others.map(o => opt(o.name, o.name, o.name === (cfg.accounts.find(x => x.current && !x.closed && x !== a)?.name))));
+        const info = h('span', { class: 'hint' });
+        const balOn = () => { const v = balances(date.value).fut[a.name] || 0; return r2(v); };
+        const upd = () => { const v = balOn(); info.textContent = Math.abs(v) < 0.005 ? 'Le compte est à zéro : rien à transférer.' : `Solde restant au ${date.value.split('-').reverse().join('/')} : ${money(v)}. Il sera transféré, l’historique reste intact.`; };
+        date.addEventListener('change', upd); upd();
+        const box = h('div', { class: 'banner', style: 'margin:4px 0 8px;display:grid;gap:10px' },
+          h('span', { text: `Clôturer « ${a.name} » : ses anciennes opérations restent dans tes statistiques et ton bilan, mais il disparaît des listes, de l’accueil et de l’épargne.` }),
+          h('div', { class: 'btnrow' }, h('label', { class: 'field' }, 'Date de clôture', date), others.length ? h('label', { class: 'field' }, 'Transférer le solde vers', dest) : null),
+          info,
+          h('div', { class: 'btnrow' },
+            h('button', { class: 'btn small primary', type: 'button', text: 'Clôturer le compte', onclick: () => {
+              const v = balOn(), d = date.value || todayStr();
+              if (Math.abs(v) >= 0.005 && dest.value) {
+                const destAcc = cfg.accounts.find(o => o.name === dest.value);
+                const type = a.savings && v > 0 && !destAcc?.savings ? "Reprise d'épargne" : 'Transfert de fonds';
+                const goal = cfg.goals.find(g => g.account === a.name);
+                const cat = type === "Reprise d'épargne" ? (goal?.category || catsFor(type)[0] || '') : (catsFor(type)[0] || '');
+                S.tx.push({ id: uid(), date: d, amount: Math.abs(v), type, category: cat, from: v > 0 ? a.name : dest.value, to: v > 0 ? dest.value : a.name, description: `Clôture ${a.name}`, pointed: true });
+              }
+              a.closed = d; U.closeAcc = null; onChange(); toast(`${a.name} clôturé${Math.abs(v) >= 0.005 && dest.value ? `, ${money(Math.abs(v))} transférés vers ${dest.value}` : ''}.`);
+            } }),
+            h('button', { class: 'btn small', type: 'button', text: 'Annuler', onclick: () => { U.closeAcc = null; onChange(); } })));
+        tb.append(h('tr', null, h('td', { colspan: 6, style: 'border-bottom:0;padding:0' }, box)));
+      }
       if (U.delAcc === a.id) {
         const others = cfg.accounts.filter(o => o !== a);
         const target = h('select', { id: `acc-move-${a.id}`, 'aria-label': 'Compte de destination' }, ...others.map(o => opt(o.name)));
@@ -2498,7 +2535,7 @@
       const defFrom = (type === 'Revenus' || type === 'Remboursement') ? 'Externe' : mainAcc();
       const defTo = (type === 'Revenus' || type === 'Remboursement') ? mainAcc() : 'Externe';
       const from = (ix.from >= 0 && c[ix.from]) || defFrom, to = (ix.to >= 0 && c[ix.to]) || defTo;
-      for (const a of [from, to]) if (a !== 'Externe' && !accNames().includes(a)) { S.cfg.accounts.push({ id: uid(), name: a, start: 0, savings: false, current: true, color: nextAccColor(S.cfg) }); newAccs.add(a); }
+      for (const a of [from, to]) if (a !== 'Externe' && !allAccNames().includes(a)) { S.cfg.accounts.push({ id: uid(), name: a, start: 0, savings: false, current: true, color: nextAccColor(S.cfg) }); newAccs.add(a); }
       const ptRaw = ix.pt >= 0 ? norm(c[ix.pt] || '') : 'oui';
       S.tx.push({ id: uid(), date, amount, type, category: cat, from, to, description: ix.desc >= 0 ? (c[ix.desc] || '') : '', pointed: !['non', 'faux', 'false', 'no', '0'].includes(ptRaw) });
       added++;
