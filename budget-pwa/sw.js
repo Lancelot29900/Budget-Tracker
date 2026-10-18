@@ -1,11 +1,11 @@
 // Cache de l'app pour un fonctionnement hors ligne.
 // Change VERSION à chaque mise à jour des fichiers pour que les appareils récupèrent la nouvelle version.
-const VERSION = 'budget-v1.8.0';
+const VERSION = 'budget-v1.9.0';
 const FILES = [
   './',
   'index.html',
-  'styles.css?v=1.8.0',
-  'app.js?v=1.8.0',
+  'styles.css?v=1.9.0',
+  'app.js?v=1.9.0',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

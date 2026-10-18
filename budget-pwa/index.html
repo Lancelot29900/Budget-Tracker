@@ -11,10 +11,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Focale">
-<link rel="manifest" href="manifest.webmanifest?v=1.8.0">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=1.8.0">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.8.0">
-<link rel="stylesheet" href="styles.css?v=1.8.0">
+<link rel="manifest" href="manifest.webmanifest?v=1.9.0">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=1.9.0">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.9.0">
+<link rel="stylesheet" href="styles.css?v=1.9.0">
 </head>
 <body>
 <a class="skip" href="#main">Aller au contenu</a>
@@ -47,10 +47,20 @@
     <section id="p-onboarding" hidden></section>
 
     <section id="p-apercu" hidden>
-      <p class="lede" id="lede"></p>
-      <div class="alerts" id="alerts"></div>
-      <div class="kpis" id="kpis"></div>
-      <div class="grid">
+      <div class="subnav" id="sub-apercu"></div>
+      <div id="ap-essentiel" class="subview">
+        <div class="hero-wrap">
+          <div class="lede" id="lede"></div>
+          <aside class="cal-card" id="cal" aria-label="Calendrier du mois"></aside>
+        </div>
+        <div class="alerts" id="alerts"></div>
+        <div class="kpis kpis-3" id="kpis"></div>
+        <div class="more-link"><button class="btn" type="button" id="toAnalyse">Voir l’analyse du mois</button></div>
+      </div>
+      <div id="ap-analyse" class="subview" hidden>
+        <div class="kpis" id="kpis-full"></div>
+        <div class="alerts" id="alerts-over"></div>
+        <div class="grid">
         <div class="card" id="c-pace">
           <h2>Budget dépenses</h2>
           <p class="note" id="pace-note">Dépenses variables face au prévu, et ce qu'il te reste pour finir le mois.</p>
@@ -93,12 +103,15 @@
           <div class="scroll"><table id="detail"></table></div>
         </div>
       </div>
+      </div>
     </section>
 
     <section id="p-transactions" hidden>
-      <div class="card" id="c-express" style="margin-top:16px"></div>
+      <div class="subnav" id="sub-transactions"></div>
+      <div class="card subview" id="c-recur" hidden></div>
+      <div id="tx-ops" class="subview">
+      <div class="card" id="c-express"></div>
       <div class="card" id="c-tosort" style="margin-top:12px" hidden></div>
-      <div class="card" id="c-recur" style="margin-top:12px"></div>
       <div class="tx-layout">
         <div class="card" id="c-form">
           <h2 id="form-title">Nouvelle transaction</h2>
@@ -133,21 +146,17 @@
           <div class="list"><table id="txlist"></table></div>
         </div>
       </div>
+      </div>
     </section>
 
     <section id="p-previsionnel" hidden>
-      <p class="lede" id="plan-lede"></p>
-      <div class="card"><div class="scroll"><table class="plan" id="plan"></table></div></div>
+      <div id="plan-head"></div>
+      <div class="card"><p class="note" id="plan-lede"></p><div class="scroll"><table class="plan" id="plan"></table></div></div>
     </section>
 
     <section id="p-epargne" hidden>
-      <p class="lede" id="ep-lede"></p>
+      <div id="ep-over"></div>
       <div class="grid">
-        <div class="card span">
-          <h2>Objectifs d'épargne</h2>
-          <p class="note">Total = montant de départ + épargnes − reprises. Les objectifs se gèrent dans Réglages.</p>
-          <div class="scroll"><table id="goals"></table></div>
-        </div>
         <div class="card">
           <h2>Évolution de l'épargne</h2>
           <p class="note">Total épargné à la fin de chaque mois de l'année affichée.</p>
@@ -169,7 +178,7 @@
 <div id="toast" class="toast" role="status" hidden></div>
 <input type="file" id="fileJson" accept="application/json,.json" hidden>
 <input type="file" id="fileCsv" accept=".csv,text/csv,text/plain" hidden>
-<script src="app.js?v=1.8.0"></script>
+<script src="app.js?v=1.9.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

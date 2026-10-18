@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '1.8.0';
+  const APP_VERSION = '1.9.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -79,7 +79,7 @@
 
   // ---------------------------------------------------------------- état
   let S = null;              // données sauvegardées : {version, cfg, tx}
-  const U = { tab: 'apercu', period: '1', year: new Date().getFullYear(), editing: null, onbStep: 0, draft: null, pendingImport: null, confirmReset: false, lastAcc: {}, msg: {} };
+  const U = { tab: 'apercu', period: '1', year: new Date().getFullYear(), editing: null, onbStep: 0, draft: null, pendingImport: null, confirmReset: false, lastAcc: {}, msg: {}, sub: { apercu: 'essentiel', transactions: 'ops' }, setSec: null };
   let fmt, fmt0, pct, num2;
 
   function defaultCfg() {
@@ -114,7 +114,8 @@
     cfg.recurring = (Array.isArray(cfg.recurring) ? cfg.recurring : []).filter(r => r && TYPES.includes(r.type)).map(r => ({
       id: r.id || uid(), label: String(r.label || ''), type: r.type, category: String(r.category || ''), from: String(r.from || 'Externe'), to: String(r.to || 'Externe'),
       amount: r2(r.amount), day: Math.min(31, Math.max(1, parseInt(r.day, 10) || 1)), every: [1, 2, 3, 6, 12].includes(+r.every) ? +r.every : 1,
-      start: /^\d{4}-\d{2}$/.test(r.start || '') ? r.start : todayStr().slice(0, 7), end: /^\d{4}-\d{2}$/.test(r.end || '') ? r.end : '', pointed: !!r.pointed, active: r.active !== false }));
+      start: /^\d{4}-\d{2}$/.test(r.start || '') ? r.start : todayStr().slice(0, 7), end: /^\d{4}-\d{2}$/.test(r.end || '') ? r.end : '', pointed: !!r.pointed, active: r.active !== false, skip: Array.isArray(r.skip) ? r.skip.filter(k => /^\d{4}-\d{2}$/.test(k)) : [] }));
+    cfg.dismissed = Array.isArray(cfg.dismissed) ? cfg.dismissed.map(String) : [];
     cfg.autoRecurring = !!cfg.autoRecurring;
     const tx = (Array.isArray(data.tx) ? data.tx : []).filter(t => t && /^\d{4}-\d{2}-\d{2}$/.test(t.date) && +t.amount > 0).map(t => ({
       id: t.id || uid(), date: t.date, amount: r2(t.amount), type: TYPES.includes(t.type) ? t.type : 'Dépenses',
@@ -335,7 +336,13 @@
     document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === U.tab)));
     for (const t of TABS) $('p-' + t).hidden = t !== U.tab;
     if (U.tab === 'apercu') renderApercu();
-    if (U.tab === 'transactions') { refreshFormOptions(); renderExpress(); renderToSort(); renderRecurring(); renderList(); }
+    if (U.tab === 'transactions') {
+      const nRec = S.cfg.recurring.length;
+      subnav('sub-transactions', 'transactions', [['ops', 'Opérations'], ['recur', nRec ? `Récurrentes (${nRec})` : 'Récurrentes']]);
+      const isRec = U.sub.transactions === 'recur';
+      $('tx-ops').hidden = isRec; $('c-recur').hidden = !isRec;
+      if (isRec) renderRecurring(); else { refreshFormOptions(); renderExpress(); renderToSort(); renderList(); }
+    }
     if (U.tab === 'credits') renderCredits();
     if (U.tab === 'previsionnel') renderPlan();
     if (U.tab === 'epargne') renderEpargne();
@@ -343,12 +350,94 @@
   }
   function showTab(tab) {
     if (!TABS.includes(tab)) tab = 'apercu';
-    U.tab = tab; U.msg.recur = '';
-    try { history.replaceState(null, '', '#' + tab); } catch (e) {}
-    render();
-    window.scrollTo({ top: 0 });
+    const dir = TABS.indexOf(tab) > TABS.indexOf(U.tab) ? 'fwd' : TABS.indexOf(tab) < TABS.indexOf(U.tab) ? 'back' : 'fade';
+    transition(() => {
+      U.tab = tab; U.msg.recur = '';
+      try { history.replaceState(null, '', '#' + tab); } catch (e) {}
+      render();
+      window.scrollTo({ top: 0 });
+    }, dir);
   }
 
+  // ---------------------------------------------------------------- navigation : sous-menus et transitions
+  const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+  /** Change d'écran avec une transition douce (glissement dans le sens de la navigation). */
+  function transition(fn, dir = 'fade') {
+    document.documentElement.dataset.nav = dir;
+    if (document.startViewTransition && !reduceMotion()) {
+      try { document.startViewTransition(() => { fn(); }); return; } catch (e) {}
+    }
+    fn();
+    if (reduceMotion()) return;
+    const s = document.querySelector('main > section:not([hidden])');
+    if (s) { s.classList.remove('enter', 'enter-fwd', 'enter-back'); void s.offsetWidth; s.classList.add(dir === 'fwd' ? 'enter-fwd' : dir === 'back' ? 'enter-back' : 'enter'); }
+  }
+  /** Contrôle segmenté de sous-navigation. */
+  function subnav(boxId, key, items) {
+    const box = $(boxId); if (!box) return;
+    box.setAttribute('role', 'tablist');
+    const cur = items.findIndex(([v]) => v === U.sub[key]);
+    box.style.setProperty('--n', items.length); box.style.setProperty('--i', Math.max(0, cur));
+    box.replaceChildren(h('span', { class: 'subnav-lens', 'aria-hidden': 'true' }), ...items.map(([v, l], i) => h('button', { type: 'button', role: 'tab', 'aria-selected': String(U.sub[key] === v), onclick: () => {
+      if (U.sub[key] === v) return;
+      transition(() => { U.sub[key] = v; render(); window.scrollTo({ top: 0 }); }, i > cur ? 'fwd' : 'back');
+    } }, l)));
+  }
+  // ---------------------------------------------------------------- calendrier du mois
+  /** Prochaine rentrée d'argent : récurrente de revenus, sinon le plus gros revenu récent reporté au même jour. */
+  function nextPayday() {
+    const today = todayStr(), tb = bm(today);
+    let best = null;
+    for (const r of S.cfg.recurring) {
+      if (!r.active || r.type !== 'Revenus') continue;
+      for (let d = 0; d < 3; d++) {
+        const { y, m } = ymOf(mIdx(tb.y, tb.m) + d); if (!isDue(r, y, m)) continue;
+        const dt = recurDate(r, y, m);
+        if (dt > today && !S.tx.some(t => t.recurId === r.id && t.date === dt) && (!best || dt < best.date)) best = { date: dt, label: r.label || r.category };
+      }
+    }
+    if (best) return best;
+    const lim = isoOf(new Date(Date.now() - 62 * 864e5));
+    const inc = S.tx.filter(t => t.type === 'Revenus' && t.date >= lim).sort((a, z) => z.amount - a.amount)[0];
+    if (!inc) return null;
+    const day = +inc.date.slice(8, 10), n = new Date();
+    const at = (y, mo) => new Date(y, mo, Math.min(day, new Date(y, mo + 1, 0).getDate()));
+    let d = at(n.getFullYear(), n.getMonth());
+    if (isoOf(d) <= today) d = at(n.getFullYear(), n.getMonth() + 1);
+    return { date: isoOf(d), label: inc.description || inc.category };
+  }
+  function renderMonthCal() {
+    const box = $('cal'); if (!box) return;
+    const today = todayStr(), tb = bm(today);
+    const [st, en] = monthRange(tb.y, tb.m);
+    const pay = nextPayday();
+    // jours où quelque chose doit encore sortir des comptes courants
+    const curAcc = new Set((S.cfg.accounts.some(a => a.current) ? S.cfg.accounts.filter(a => a.current) : S.cfg.accounts.filter(a => !a.savings)).map(a => a.name));
+    const outDays = new Set();
+    for (const t of S.tx) if (!t.pointed && t.date >= today && curAcc.has(t.from) && !curAcc.has(t.to)) outDays.add(t.date);
+    for (const x of recurStatus(tb.y, tb.m)) if (!x.done && x.date >= today && curAcc.has(x.r.from) && x.r.type !== 'Revenus') outDays.add(x.date);
+    const grid = h('div', { class: 'cal-grid', role: 'grid' });
+    for (const d of ['L', 'M', 'M', 'J', 'V', 'S', 'D']) grid.append(h('span', { class: 'cal-wd', 'aria-hidden': 'true', text: d }));
+    const first = new Date(st); const lead = (first.getDay() + 6) % 7;
+    for (let i = 0; i < lead; i++) grid.append(h('span'));
+    for (let d = new Date(st); d <= en; d.setDate(d.getDate() + 1)) {
+      const iso = isoOf(d);
+      const cls = ['cal-d', iso < today ? 'past' : iso === today ? 'today' : 'next', pay && pay.date === iso ? 'pay' : '', outDays.has(iso) ? 'out' : ''].filter(Boolean).join(' ');
+      grid.append(h('span', { class: cls, title: pay && pay.date === iso ? `${pay.label} attendu` : outDays.has(iso) ? 'Prélèvement prévu' : null }, String(d.getDate())));
+    }
+    const left = Math.max(0, Math.round((en - new Date(today + 'T00:00:00')) / 864e5));
+    let line;
+    if (pay) {
+      const dd = Math.max(1, Math.round((new Date(pay.date + 'T00:00:00') - new Date(today + 'T00:00:00')) / 864e5));
+      const when = new Date(pay.date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+      line = [h('b', { text: dd === 1 ? 'Demain' : `Dans ${dd} jours` }), ` : ${pay.label.toLowerCase() === 'salaire' ? 'ton salaire' : pay.label}, le ${when}.`];
+    } else line = [h('b', { text: left ? `${left} jour${left > 1 ? 's' : ''}` : 'Dernier jour' }), left ? ' avant le mois suivant.' : ' du mois.'];
+    const legend = h('div', { class: 'cal-legend' },
+      pay && pay.date <= isoOf(en) ? h('span', null, h('i', { class: 'lg pay' }), 'rentrée') : null,
+      outDays.size ? h('span', null, h('i', { class: 'lg out' }), 'prélèvement prévu') : null);
+    const title = new Date(st.getTime() + 10 * 864e5).toLocaleDateString('fr-FR', { month: 'long' });
+    box.replaceChildren(h('div', { class: 'cal-top' }, h('span', { class: 'cal-title', text: title.charAt(0).toUpperCase() + title.slice(1) })), grid, h('p', { class: 'cal-line' }, ...line), legend.childNodes.length ? legend : '');
+  }
   // ---------------------------------------------------------------- aperçu
   function prevPeriod() {
     if (U.period === 'year') return { p: 'year', y: U.year - 1, label: String(U.year - 1) };
@@ -402,13 +491,6 @@
     const now = new Date();
     box.append(h('div', { class: 'hero-label', text: `Disponible sur tes comptes courants, le ${now.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}` }),
       h('div', { class: 'hero-num num' + (totReal < 0 ? ' neg' : '') }, moneyEl(totReal)));
-    { // réglette du mois : un trait par jour, le jour courant marqué
-      const tb = bm(todayStr()); const [st, en] = monthRange(tb.y, tb.m);
-      const total = Math.round((en - st) / 864e5) + 1, done = Math.min(total, Math.max(1, Math.floor((now - st) / 864e5) + 1));
-      const ruler = h('div', { class: 'ruler', role: 'img', 'aria-label': `Jour ${done} sur ${total} du mois budgétaire` });
-      for (let i = 1; i <= total; i++) ruler.append(h('i', { class: (i < done ? 'past' : i === done ? 'now' : '') + (i % 5 === 0 ? ' major' : '') }));
-      box.append(h('div', { class: 'ruler-wrap' }, ruler, h('span', { class: 'ruler-lbl', text: `${total - done} jour${total - done > 1 ? 's' : ''} avant la fin du mois` })));
-    }
     // un chip par compte courant
     const chips = h('div', { class: 'acc-chips' });
     for (const a of list) {
@@ -424,34 +506,32 @@
     const [, end] = monthRange(rm.y, rm.m); end.setHours(23, 59, 59);
     const daysLeft = Math.max(1, Math.ceil((end - now) / 864e5));
     const live = r2(totFut + rm.income - rm.bills - rm.savings);
+    const deMois = (m) => (/^[aeiouy]/i.test(MONTHS[m - 1]) ? 'd’' : 'de ') + MONTHS[m - 1].toLowerCase();
     const txt = h('p', { class: 'hero-text' });
+    if (live >= 0) txt.append('Il te restera ', h('b', { text: money(live) }), ` pour finir ${MONTHS[rm.m - 1].toLowerCase()}, soit `, h('b', { text: `${money(live / daysLeft)} par jour` }), '.');
+    else txt.append('Il manque ', h('b', { class: 'neg', text: money(-live) }), ` pour couvrir ce qui est encore prévu d’ici la fin ${deMois(rm.m)}.`);
+    box.append(txt);
     const parts = [];
     if (rm.bills) parts.push(`${money(rm.bills)} de factures`);
     if (rm.savings) parts.push(`${money(rm.savings)} d’épargne`);
     if (rm.income) parts.push(`+${money(rm.income)} de revenus attendus`);
-    const after = parts.length ? `En comptant ce qui doit encore passer ce mois-ci (${parts.join(', ')}), ` : 'Une fois les opérations en attente passées, ';
-    const deMois = (m) => (/^[aeiouy]/i.test(MONTHS[m - 1]) ? 'd’' : 'de ') + MONTHS[m - 1].toLowerCase();
     const facts = [];
     if (rm.sav.done) facts.push(`${money(rm.sav.done)} d’épargne`);
     if (rm.bil.done) facts.push(`${money(rm.bil.done)} de factures`);
-    if (facts.length) txt.append(`Déjà passé ce mois-ci : ${facts.join(' et ')}, c’est compris dans les soldes ci-dessus. `);
-    if (live >= 0) {
-      txt.append(after, 'il te restera ', h('b', { text: money(live) }), ` pour finir ${MONTHS[rm.m - 1].toLowerCase()}, soit `, h('b', { text: `${money(live / daysLeft)} par jour` }), ` sur ${daysLeft} jour${daysLeft > 1 ? 's' : ''}.`);
-      if (rm.spend > live + 0.5) txt.append(` C’est ${money(r2(rm.spend - live))} de moins que ton budget dépenses restant (${money(rm.spend)}).`);
-    } else {
-      txt.append(after, 'il te manquera ', h('b', { class: 'neg', text: money(-live) }), ` sur tes comptes courants d’ici la fin ${deMois(rm.m)}. ${rm.savings ? 'Pense à réduire ou décaler un virement d’épargne encore prévu, ou à puiser dans une réserve.' : 'Pense à puiser dans une réserve ou à transférer depuis un autre compte.'}`);
-    }
-    box.append(txt);
     const det = [...rm.bil.items.map(i => [i.cat, -i.left, 'Facture', 'Factures']), ...rm.sav.items.map(i => [i.cat, -i.left, 'Épargne', 'Épargnes']), ...rm.inc.items.map(i => [i.cat, i.left, 'Revenu', 'Revenus'])];
     const skip = (g, c, v) => {
       const plan = (S.cfg.plan[rm.y] ||= {}); const arr = ((plan[g] ||= {})[c] ||= Array(12).fill(0));
       arr[rm.m - 1] = r2(Math.max(0, (+arr[rm.m - 1] || 0) - Math.abs(v))); U.heroOpen = true; commit();
-      toast(`${c} : prévu d’${MONTHS[rm.m - 1].toLowerCase()} réduit de ${money(Math.abs(v))}.`);
+      toast(`${c} : prévu ${deMois(rm.m)} réduit de ${money(Math.abs(v))}.`);
     };
-    if (det.length) box.append(h('details', { class: 'hero-det', open: !!U.heroOpen }, h('summary', { text: 'Ce qui est encore prévu ce mois-ci' }),
-      h('ul', null, ...det.map(([c, v, k, g]) => h('li', null, h('span', { class: 'det-k', text: k }), h('span', { class: 'det-c', text: c }), h('span', { class: 'num' + (v > 0 ? ' pos' : ''), text: ' ' + sgn(v) }),
-        h('button', { class: 'btn small ghost', type: 'button', text: 'Ne passera pas', title: 'Retirer ce montant du prévu de ce mois', onclick: () => skip(g, c, v) })))),
-      h('p', { class: 'hint', text: 'Calculé avec ton prévisionnel : prévu du mois moins ce qui est déjà saisi. Si une ligne n’arrivera pas ce mois-ci, touche « Ne passera pas ».' })));
+    box.append(h('details', { class: 'hero-det', open: !!U.heroOpen, ontoggle: (e) => { U.heroOpen = e.target.open; } }, h('summary', { text: 'Comment c’est calculé' }),
+      h('p', { class: 'hint' }, `On part de ce qui est sur tes comptes courants, opérations en attente comprises (${money(totFut)}).`,
+        facts.length ? ` Déjà passé ce mois-ci : ${facts.join(' et ')}.` : '',
+        parts.length ? ` Encore prévu d’ici la fin du mois : ${parts.join(', ')}.` : ' Rien d’autre n’est prévu d’ici la fin du mois.'),
+      det.length ? h('ul', null, ...det.map(([c, v, k, g]) => h('li', null, h('span', { class: 'det-k', text: k }), h('span', { class: 'det-c', text: c }), h('span', { class: 'num' + (v > 0 ? ' pos' : ''), text: ' ' + sgn(v) }),
+        h('button', { class: 'btn small ghost', type: 'button', text: 'Ne passera pas', title: 'Retirer ce montant du prévu de ce mois', onclick: () => skip(g, c, v) })))) : null,
+      live < 0 ? h('p', { class: 'hint', text: rm.savings ? 'Tu peux réduire ou décaler un virement d’épargne encore prévu, ou puiser dans une réserve.' : 'Tu peux puiser dans une réserve ou transférer depuis un autre compte.' }) : null,
+      live >= 0 && rm.spend > live + 0.5 ? h('p', { class: 'hint', text: `Ton budget dépenses restant (${money(rm.spend)}) dépasse ce qui reste : garde un œil sur les petites dépenses.` }) : null));
   }
 
   function renderApercu() {
@@ -461,8 +541,12 @@
     const reste = r2(t.Revenus - t.Factures - t['Dépenses'] - netSave);
     const rate = t.Revenus ? netSave / t.Revenus : 0;
     const overD = r2(t['Dépenses'] - pD);
+    subnav('sub-apercu', 'apercu', [['essentiel', 'L’essentiel'], ['analyse', 'Analyse du mois']]);
+    const ana = U.sub.apercu === 'analyse';
+    $('ap-essentiel').hidden = ana; $('ap-analyse').hidden = !ana;
     const lede = $('lede'); lede.replaceChildren();
     lede.className = 'hero';
+    renderMonthCal();
     if (!S.tx.length) {
       lede.append(h('div', { class: 'hero-label', text: 'Bienvenue' }), h('p', { class: 'hero-text', text: 'Ton budget est prêt. Ajoute ta première transaction avec « + Transaction », puis remplis ton prévisionnel pour comparer prévu et réel.' }));
     } else renderCashHero(lede);
@@ -470,16 +554,17 @@
     const alerts = $('alerts'); alerts.replaceChildren();
     const alert = (cls, text, btnLabel, fn) => h('span', { class: 'alert ' + cls }, h('i'), text, btnLabel ? h('button', { type: 'button', text: btnLabel, onclick: fn }) : null);
     if (U.period !== 'year') {
-      const st = recurStatus(U.year, +U.period).filter(x => !x.done);
-      if (st.length) alerts.append(alert('info', `${st.length} opération${st.length > 1 ? 's' : ''} récurrente${st.length > 1 ? 's' : ''} à reporter`, 'Reporter', () => { postRecurring(st, U.year, +U.period); commit(); }));
+      const st = recurStatus(U.year, +U.period).filter(x => !x.done && !x.skipped && x.date <= todayStr());
+      if (st.length) alerts.append(alert('info', `${st.length} récurrente${st.length > 1 ? 's' : ''} à reporter`, 'Voir', () => { U.sub.transactions = 'recur'; showTab('transactions'); }));
     }
     const nSort = S.tx.filter(x => x.toSort).length;
     if (nSort) alerts.append(alert('info', `${nSort} opération${nSort > 1 ? 's' : ''} à classer`, 'Classer', () => showTab('transactions')));
     const unp = S.tx.filter(x => !x.pointed && inPeriod(x)).length;
     if (unp) alerts.append(alert('', `${unp} transaction${unp > 1 ? 's' : ''} non pointée${unp > 1 ? 's' : ''}`, 'Voir', () => { $('fp').value = '0'; showTab('transactions'); }));
     const over = overCategories(b);
-    over.slice(0, 3).forEach(o => alerts.append(alert('bad', `${o.c} : +${money(o.over)} ${o.p ? 'au-dessus du prévu' : 'sans budget prévu'}`)));
-    if (over.length > 3) alerts.append(alert('bad', `et ${over.length - 3} autre${over.length - 3 > 1 ? 's' : ''} catégorie${over.length - 3 > 1 ? 's' : ''} dépassée${over.length - 3 > 1 ? 's' : ''}`));
+    const alertsOver = $('alerts-over'); alertsOver.replaceChildren();
+    over.slice(0, 3).forEach(o => alertsOver.append(alert('bad', `${o.c} : +${money(o.over)} ${o.p ? 'au-dessus du prévu' : 'sans budget prévu'}`)));
+    if (over.length > 3) alertsOver.append(alert('bad', `et ${over.length - 3} autre${over.length - 3 > 1 ? 's' : ''} catégorie${over.length - 3 > 1 ? 's' : ''} dépassée${over.length - 3 > 1 ? 's' : ''}`));
     // KPI avec variation
     const pp = prevPeriod(), pb = budget(pp.p, pp.y).tot, hasPrev = S.tx.some(x => inPeriod(x, pp.p, pp.y));
     const pReste = r2(pb.Revenus - pb.Factures - pb['Dépenses'] - (pb['Épargnes'] - pb.reprises));
@@ -490,7 +575,12 @@
       return h('span', { class: 'delta ' + (good ? 'pos' : 'neg'), text: `${d > 0 ? '▲' : '▼'} ${money(Math.abs(d))} vs ${pp.label}` });
     };
     const kpi = (lbl, val, sub, dl, cls) => h('div', { class: 'kpi' }, h('span', { class: 'lbl', text: lbl }), h('span', { class: 'val ' + (cls || ''), text: val }), dl, h('span', { class: 'sub', text: sub }));
+    const sorties = r2(t.Factures + t['Dépenses']), pSorties = r2(pF + pD);
     $('kpis').replaceChildren(
+      kpi('Entré ce mois', money(t.Revenus), pRev ? `sur ${money(pRev)} prévus` : 'revenus de la période'),
+      kpi('Sorti', money(sorties), pSorties ? `sur ${money(pSorties)} prévus` : 'factures et dépenses', null, pSorties && sorties > pSorties + 0.004 ? 'neg' : ''),
+      kpi('Mis de côté', money(netSave), pE ? `sur ${money(pE)} prévus` : 'épargne nette'));
+    $('kpis-full').replaceChildren(
       kpi('Revenus', money(t.Revenus), `prévu ${money(pRev)}`, delta(t.Revenus, pb.Revenus, true)),
       kpi('Factures', money(t.Factures), `prévu ${money(pF)}`, delta(t.Factures, pb.Factures, false)),
       kpi('Dépenses', money(t['Dépenses']), `prévu ${money(pD)}`, delta(t['Dépenses'], pb['Dépenses'], false), overD > 0.004 && pD > 0 ? 'neg' : ''),
@@ -540,7 +630,7 @@
     }
     $('detail').replaceChildren(h('thead', null, h('tr', null, h('th', { text: 'Catégorie' }), h('th', { class: 'r', text: 'Prévu' }), h('th', { class: 'r', text: 'Réel' }), h('th', { text: 'Consommé' }), h('th', { class: 'r', text: 'Écart' }))), tb);
     $('split-note').textContent = `Factures et dépenses de ${periodLabel()}, par catégorie.`;
-    drawMonths(); drawSplit(); drawWorth();
+    if (ana) { drawMonths(); drawSplit(); drawWorth(); }
   }
 
   /** Rythme des dépenses variables sur la période : jauge, reste par jour, projection. */
@@ -837,7 +927,7 @@
           h('button', { class: 'btn small', type: 'button', text: 'Non', onclick: () => renderList() }));
       });
       const mk = h('button', { class: 'btn small ghost a-recur', type: 'button', text: '↻', title: t.recurId ? 'Issue d’une récurrente' : 'Rendre récurrente (chaque mois)', 'aria-label': 'Rendre récurrente', disabled: !!t.recurId || null,
-        onclick: () => { recurFromTx(t); U.recurOpen = true; U.msg.recur = `« ${t.description || t.category} » ajoutée aux récurrentes (chaque mois le ${+t.date.slice(8, 10)}).`; commit(); setTimeout(() => $('c-recur').scrollIntoView({ behavior: 'smooth' }), 50); } });
+        onclick: () => { recurFromTx(t); U.recurOpen = true; U.msg.recur = `« ${t.description || t.category} » ajoutée aux récurrentes (chaque mois le ${+t.date.slice(8, 10)}).`; commit(); U.sub.transactions = 'recur'; } });
       acts.append(mk, h('button', { class: 'btn small a-edit', type: 'button', text: 'Modifier', onclick: () => editTx(t) }), del);
       tb.append(h('tr', { class: (t.pointed ? '' : 'unpointed') + ' acc-row', style: mainA !== 'Externe' ? `--ac:${accColor(mainA)}` : null },
         h('td', { class: 't-cb' }, cb),
@@ -919,13 +1009,14 @@
   function recurStatus(y, m) {
     return S.cfg.recurring.filter(r => isDue(r, y, m)).map(r => ({
       r, date: recurDate(r, y, m),
-      done: S.tx.some(t => t.recurId === r.id && (() => { const b = bm(t.date); return b.y === y && b.m === m; })())
+      done: S.tx.some(t => t.recurId === r.id && (() => { const b = bm(t.date); return b.y === y && b.m === m; })()),
+      skipped: (r.skip || []).includes(ymStr(y, m))
     }));
   }
   function postRecurring(items, y, m) {
     let n = 0;
-    for (const { r, done } of items) {
-      if (done) continue;
+    for (const { r, done, skipped } of items) {
+      if (done || skipped) continue;
       S.tx.push({ id: uid(), date: recurDate(r, y, m), amount: r.amount, type: r.type, category: r.category, from: r.from, to: r.to, description: r.label, pointed: r.pointed, recurId: r.id });
       n++;
     }
@@ -980,45 +1071,68 @@
     if (match) match.recurId = r.id;
   }
 
+  const suggKey = (sg) => [sg.type, sg.category, sg.from, sg.to, String(sg.label || '').toLowerCase()].join('|');
   function renderRecurring() {
     const box = $('c-recur');
     const p = U.period === 'year' ? null : +U.period, y = U.year;
-    const head = h('div', { class: 'rec-head' }, h('div', null, h('h2', { text: 'Opérations récurrentes' }),
-      h('p', { class: 'note', style: 'margin-bottom:0', text: 'Factures, salaire, virements d’épargne… Définis-les une fois, puis reporte-les chaque mois en un clic.' })));
+    const today = todayStr();
+    const auto = h('input', { type: 'checkbox', class: 'switch', id: 'rec-auto', checked: S.cfg.autoRecurring, role: 'switch' });
+    auto.addEventListener('change', () => { S.cfg.autoRecurring = auto.checked; if (auto.checked) autoPostRecurring(); commit(); });
+    const head = h('div', { class: 'rec-head' },
+      h('div', null, h('h2', { text: 'Opérations récurrentes' }), h('p', { class: 'note', style: 'margin-bottom:0', text: 'Salaire, loyer, abonnements, virements d’épargne : définis-les une fois, l’app les prépare chaque mois.' })),
+      h('label', { class: 'switch-row' }, h('span', null, 'Report automatique'), auto));
     const parts = [head];
-    if (p) {
-      const st = recurStatus(y, p), todo = st.filter(x => !x.done);
+    if (p && S.cfg.recurring.length) {
+      const st = recurStatus(y, p);
+      const done = st.filter(x => x.done), skipped = st.filter(x => x.skipped), todo = st.filter(x => !x.done && !x.skipped);
+      const late = todo.filter(x => x.date <= today), later = todo.filter(x => x.date > today);
       if (st.length) {
-        const total = todo.reduce((a, x) => a + (x.r.type === 'Revenus' ? x.r.amount : -x.r.amount) * (['Revenus', 'Factures', 'Dépenses'].includes(x.r.type) ? 1 : 0), 0);
-        head.append(todo.length
-          ? h('button', { class: 'btn primary', type: 'button', id: 'rec-post-all', text: `Reporter les ${todo.length} de ${MONTHS[p - 1].toLowerCase()}`, onclick: () => { const n = postRecurring(todo, y, p); U.msg.recur = `${n} opération${n > 1 ? 's' : ''} reportée${n > 1 ? 's' : ''} en ${monthName(y, p)}, non pointée${n > 1 ? 's' : ''}.`; commit(); } })
-          : h('span', { class: 'done', style: 'color:var(--ok);font-size:13px', text: `✓ Tout est reporté pour ${MONTHS[p - 1].toLowerCase()}` }));
-        const list = h('div', { class: 'rec-due' });
-        for (const x of st) {
+        const ok = done.length + skipped.length;
+        const sum = h('div', { class: 'rec-sum' },
+          h('div', { class: 'rec-ring', style: `--p:${st.length ? ok / st.length : 1}`, 'aria-hidden': 'true' }),
+          h('div', null,
+            h('div', { class: 'rec-sum-t', text: todo.length ? `${ok} sur ${st.length} en place pour ${MONTHS[p - 1].toLowerCase()}` : `Tout est en place pour ${MONTHS[p - 1].toLowerCase()}` }),
+            h('div', { class: 'hint', text: todo.length ? [late.length ? `${late.length} à reporter` : '', later.length ? `${later.length} prévue${later.length > 1 ? 's' : ''} plus tard dans le mois` : ''].filter(Boolean).join(', ') + '.' : `${st.length} opération${st.length > 1 ? 's' : ''} ce mois-ci${skipped.length ? `, dont ${skipped.length} passée${skipped.length > 1 ? 's' : ''}` : ''}.` })),
+          todo.length ? h('button', { class: 'btn primary', type: 'button', id: 'rec-post-all', text: 'Tout reporter', onclick: () => { const n = postRecurring(todo, y, p); toast(`${n} opération${n > 1 ? 's' : ''} reportée${n > 1 ? 's' : ''}, en attente de pointage.`); commit(); } }) : null);
+        parts.push(sum);
+        const row = (x) => {
           const sign = x.r.type === 'Revenus' ? '+' : ['Factures', 'Dépenses'].includes(x.r.type) ? '−' : '';
-          list.append(h('div', null,
-            h('div', null, h('div', null, typeChip(x.r.type), ' ', x.r.label || x.r.category), h('div', { class: 'desc', text: `Le ${+x.date.slice(8, 10)}, ${x.r.category}, de ${x.r.from} vers ${x.r.to}` })),
-            h('span', { class: 'num' + (sign === '+' ? ' pos' : ''), text: sign + money(x.r.amount) }),
-            x.done ? h('span', { class: 'done', text: '✓ reportée' }) : h('button', { class: 'btn small', type: 'button', text: 'Reporter', onclick: () => { postRecurring([x], y, p); commit(); } })));
-        }
-        parts.push(todo.length ? list : h('details', { class: 'more' }, h('summary', { text: `Voir les ${st.length} opérations de ${MONTHS[p - 1].toLowerCase()}` }), list));
-        if (total) parts.push(h('p', { class: 'hint', style: 'margin:8px 0 0', text: `Solde des récurrentes de ${MONTHS[p - 1].toLowerCase()} : ${sgn(r2(total))} (revenus − factures et dépenses).` }));
-      } else parts.push(h('p', { class: 'hint', text: S.cfg.recurring.length ? `Aucune récurrente prévue en ${monthName(y, p)}.` : 'Aucune récurrente pour l’instant. Ajoute-en une, transforme une transaction avec le bouton ↻, ou pars des suggestions ci-dessous.' }));
-    } else parts.push(h('p', { class: 'hint', text: 'Choisis un mois en haut pour reporter ses opérations récurrentes.' }));
-    if (U.msg.recur) parts.push(h('p', { class: 'ok-msg', text: U.msg.recur }));
+          const key = ymStr(y, p);
+          const state = x.done ? h('span', { class: 'rec-state ok', text: 'En place' })
+            : x.skipped ? h('span', { class: 'rec-acts' }, h('span', { class: 'rec-state', text: 'Passée ce mois' }), h('button', { class: 'btn small ghost', type: 'button', text: 'Rétablir', onclick: () => { x.r.skip = (x.r.skip || []).filter(k => k !== key); commit(); } }))
+            : h('span', { class: 'rec-acts' },
+              h('button', { class: 'btn small ghost', type: 'button', text: 'Passer', title: 'Ne pas la reporter ce mois-ci', onclick: () => { x.r.skip = [...new Set([...(x.r.skip || []), key])]; commit(); toast(`${x.r.label || x.r.category} passée pour ${MONTHS[p - 1].toLowerCase()}.`, () => { x.r.skip = (x.r.skip || []).filter(k => k !== key); commit(); }); } }),
+              h('button', { class: 'btn small', type: 'button', text: 'Reporter', onclick: () => { postRecurring([x], y, p); commit(); } }));
+          return h('div', { class: 'rec-row' + (x.done || x.skipped ? ' settled' : '') },
+            h('span', { class: 'rec-day num', text: String(+x.date.slice(8, 10)) }),
+            h('div', { class: 'rec-what' }, h('div', { class: 'rec-lbl', text: x.r.label || x.r.category }), h('div', { class: 'desc', text: `${x.r.category}, ${x.r.from === 'Externe' ? 'vers ' + x.r.to : 'depuis ' + x.r.from}` })),
+            h('span', { class: 'num rec-amt' + (sign === '+' ? ' pos' : ''), text: sign + money(x.r.amount) }), state);
+        };
+        const list = h('div', { class: 'rec-list' }, ...st.sort((a, b) => a.date.localeCompare(b.date)).map(row));
+        parts.push(todo.length ? list : h('details', { class: 'more' }, h('summary', { text: `Voir les ${st.length} opérations` }), list));
+      } else parts.push(h('p', { class: 'hint', text: `Aucune récurrente prévue en ${monthName(y, p)}.` }));
+    } else if (!S.cfg.recurring.length) parts.push(h('p', { class: 'hint', text: 'Aucune récurrente pour l’instant. Valide les suggestions ci-dessous, ou transforme une transaction avec le bouton ↻.' }));
+    else parts.push(h('p', { class: 'hint', text: 'Choisis un mois en haut pour voir ses opérations récurrentes.' }));
 
-    // suggestions
-    const sugg = suggestRecurring();
+    // suggestions : à ajouter ou à ignorer
+    S.cfg.dismissed = Array.isArray(S.cfg.dismissed) ? S.cfg.dismissed : [];
+    const sugg = suggestRecurring().filter(sg => !S.cfg.dismissed.includes(suggKey(sg)));
     if (sugg.length) {
       const sl = h('div', { class: 'sugg' });
-      sugg.forEach((sg, i) => sl.append(h('div', null,
-        h('div', null, h('div', null, typeChip(sg.type), ' ', sg.label), h('div', { class: 'desc', text: `Vers le ${sg.day}, vue ${sg.months} mois sur les 4 derniers, de ${sg.from} vers ${sg.to}` })),
-        h('span', { class: 'num', text: money(sg.amount) }),
-        h('button', { class: 'btn small', type: 'button', id: `sugg-${i}`, text: 'Ajouter', onclick: () => { addSuggestion(sg); commit(); } }))));
-      parts.push(h('details', { class: 'more', open: !S.cfg.recurring.length || null },
-        h('summary', { text: `Suggestions détectées dans tes transactions (${sugg.length})` }),
-        h('div', { class: 'btnrow', style: 'margin:8px 0' }, h('button', { class: 'btn small', type: 'button', text: 'Tout ajouter', onclick: () => { sugg.forEach(addSuggestion); commit(); } })), sl));
+      sugg.forEach((sg, i) => sl.append(h('div', { class: 'sugg-row' },
+        h('div', { class: 'rec-what' }, h('div', { class: 'rec-lbl' }, typeChip(sg.type), ' ', sg.label), h('div', { class: 'desc', text: `Vers le ${sg.day} de chaque mois, vue ${sg.months} mois sur 4` })),
+        h('span', { class: 'num rec-amt', text: money(sg.amount) }),
+        h('span', { class: 'rec-acts' },
+          h('button', { class: 'btn small ghost', type: 'button', text: 'Ignorer', onclick: () => { S.cfg.dismissed.push(suggKey(sg)); commit(); } }),
+          h('button', { class: 'btn small', type: 'button', id: `sugg-${i}`, text: 'Ajouter', onclick: () => { addSuggestion(sg); commit(); toast(`${sg.label} ajoutée aux récurrentes.`); } })))));
+      parts.push(h('div', { class: 'sugg-box' },
+        h('div', { class: 'sugg-head' }, h('h3', { text: `${sugg.length} suggestion${sugg.length > 1 ? 's' : ''} trouvée${sugg.length > 1 ? 's' : ''} dans tes transactions` }),
+          h('span', { class: 'rec-acts' },
+            h('button', { class: 'btn small ghost', type: 'button', text: 'Tout ignorer', onclick: () => { sugg.forEach(sg => S.cfg.dismissed.push(suggKey(sg))); commit(); } }),
+            h('button', { class: 'btn small', type: 'button', text: 'Tout ajouter', onclick: () => { sugg.forEach(addSuggestion); commit(); } }))), sl));
     }
+    if (S.cfg.dismissed.length) parts.push(h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${S.cfg.dismissed.length} suggestion${S.cfg.dismissed.length > 1 ? 's' : ''} ignorée${S.cfg.dismissed.length > 1 ? 's' : ''}. `, h('button', { class: 'linkbtn', type: 'button', text: 'Les revoir', onclick: () => { S.cfg.dismissed = []; commit(); } })));
+    if (U.msg.recur) parts.push(h('p', { class: 'ok-msg', text: U.msg.recur }));
 
     // gestion
     const items = h('div', { class: 'rec-items' });
@@ -1044,11 +1158,8 @@
         h('div', { class: 'btnrow', style: 'margin-top:8px' }, chk('active', 'Active'), chk('pointed', 'Reporter déjà pointée'),
           h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', style: 'margin-left:auto', onclick: () => { S.cfg.recurring.splice(i, 1); S.tx.forEach(t => { if (t.recurId === r.id) delete t.recurId; }); commit(); } }))));
     });
-    const auto = h('input', { type: 'checkbox', id: 'rec-auto', checked: S.cfg.autoRecurring });
-    auto.addEventListener('change', () => { S.cfg.autoRecurring = auto.checked; commit(); });
     parts.push(h('details', { class: 'more', id: 'rec-manage', open: U.recurOpen || null, ontoggle: (e) => { U.recurOpen = e.target.open; } },
       h('summary', { text: `Gérer les récurrentes (${S.cfg.recurring.length})` }),
-      h('label', { class: 'check', style: 'margin:10px 0 0;font-size:13px' }, auto, 'Reporter automatiquement les récurrentes du mois en cours à l’ouverture de l’app'),
       items,
       h('div', { class: 'btnrow', style: 'margin-top:10px' }, h('button', { class: 'btn', type: 'button', text: '+ Nouvelle récurrente', onclick: () => {
         const tb = bm(todayStr());
@@ -1227,12 +1338,53 @@
   }
 
   // ---------------------------------------------------------------- prévisionnel
+  /** Remplit les cases vides avec la moyenne des 3 derniers mois réels. */
+  function prefillPlan(y, fromM) {
+    const tb = bm(todayStr()), cur = mIdx(tb.y, tb.m);
+    const bs = [1, 2, 3].map(k => { const { y: yy, m: mm } = ymOf(cur - k); return budget(String(mm), yy); });
+    let filled = 0;
+    for (const g of GROUPS) for (const c of S.cfg.categories[g]) {
+      const avg = Math.round(bs.reduce((a, b) => a + (b[g][c] || 0), 0) / 3);
+      if (avg <= 0) continue;
+      S.cfg.plan[y] = S.cfg.plan[y] || {}; S.cfg.plan[y][g] = S.cfg.plan[y][g] || {};
+      const arr = Array.from({ length: 12 }, (_, k) => +(S.cfg.plan[y][g][c] || [])[k] || 0);
+      let ch = false; for (let k = fromM - 1; k < 12; k++) if (!arr[k]) { arr[k] = avg; ch = true; filled++; }
+      if (ch) S.cfg.plan[y][g][c] = arr;
+    }
+    return filled;
+  }
+  function renderPlanHead() {
+    const y = U.year, tb = bm(todayStr());
+    const m = U.period === 'year' ? (tb.y === y ? tb.m : 1) : +U.period;
+    const tot = (g) => plannedTotal(g, String(m), y);
+    const rev = tot('Revenus'), fac = tot('Factures'), dep = tot('Dépenses'), ep = tot('Épargnes');
+    const marge = r2(rev - fac - dep - ep);
+    const empty = !rev && !fac && !dep && !ep;
+    const box = $('plan-head');
+    const fromM = tb.y === y ? tb.m : 1;
+    const prefill = h('button', { class: 'btn primary', type: 'button', text: 'Préremplir avec mes habitudes', title: 'Moyenne de tes 3 derniers mois, uniquement dans les cases vides', onclick: () => {
+      const n = prefillPlan(y, fromM); commit(); toast(n ? `${n} case${n > 1 ? 's' : ''} préremplie${n > 1 ? 's' : ''} avec la moyenne de tes 3 derniers mois. Ajuste ce qui doit l’être.` : 'Rien à préremplir : les cases sont déjà remplies ou il manque de l’historique.');
+    } });
+    const prevPlan = S.cfg.plan[y - 1];
+    const copy = empty && prevPlan ? h('button', { class: 'btn', type: 'button', text: `Reprendre ${y - 1}`, onclick: () => { S.cfg.plan[y] = clone(prevPlan); commit(); } }) : null;
+    const seg = (v, c, l) => v > 0 && rev > 0 ? h('i', { style: `width:${Math.min(100, v / Math.max(rev, fac + dep + ep) * 100)}%;background:${c}`, title: `${l} : ${money(v)}` }) : null;
+    const mois = MONTHS[m - 1].toLowerCase();
+    box.replaceChildren(h('div', { class: 'card plan-sum' },
+      empty
+        ? h('div', null, h('h2', { text: 'Prépare ton mois type' }), h('p', { class: 'note', text: 'Le prévisionnel sert à savoir à l’avance ce qui va entrer et sortir. Pas besoin de tout remplir : l’app peut partir de tes 3 derniers mois, tu n’as plus qu’à ajuster.' }))
+        : h('div', null,
+          h('h2', { text: `Ton ${mois} prévu` }),
+          h('p', { class: 'plan-marge' }, marge >= 0 ? ['Il te reste ', h('b', { text: money(marge) }), ' de marge une fois tout payé et épargné.'] : ['Tu prévois ', h('b', { class: 'neg', text: money(-marge) }), ' de plus que tes revenus.']),
+          h('div', { class: 'alloc plan-bar' }, seg(fac, 'var(--muted)', 'Factures'), seg(dep, 'var(--ochre)', 'Dépenses'), seg(ep, 'var(--plum)', 'Épargne'), marge > 0 ? seg(marge, 'var(--accent)', 'Marge') : null),
+          h('div', { class: 'plan-legend' },
+            ...[['Revenus', rev, ''], ['Factures', fac, 'var(--muted)'], ['Dépenses', dep, 'var(--ochre)'], ['Épargne', ep, 'var(--plum)'], ['Marge', Math.max(0, marge), 'var(--accent)']].map(([l, v, c]) => h('span', null, c ? h('i', { class: 'sw', style: `background:${c}` }) : null, l, h('b', { class: 'num', text: money(v) }))))),
+      h('div', { class: 'btnrow' }, prefill, copy)));
+  }
   function renderPlan() {
     const y = U.year;
-    const lede = $('plan-lede'); lede.replaceChildren(`Prévisionnel ${y}, mois par mois. Chaque case est enregistrée dès que tu la quittes. Le bouton « Répéter » recopie la valeur de `, h('b', { text: U.period === 'year' ? 'janvier' : MONTHS[+U.period - 1].toLowerCase() }), ' (mois choisi en haut) sur les mois suivants.');
-    const prevPlan = S.cfg.plan[y - 1];
-    const empty = !S.cfg.plan[y] || !Object.values(S.cfg.plan[y]).some(g => Object.values(g || {}).some(a => (a || []).some(v => +v)));
-    if (empty && prevPlan) lede.append(' ', h('button', { class: 'btn small', type: 'button', text: `Copier le prévisionnel ${y - 1}`, onclick: () => { S.cfg.plan[y] = clone(prevPlan); commit(); } }));
+    renderPlanHead();
+    U.planOpen = U.planOpen || {};
+    $('plan-lede').replaceChildren(`Touche une famille pour l’ouvrir. Chaque case s’enregistre dès que tu la quittes ; « Répéter » recopie la valeur de `, h('b', { text: U.period === 'year' ? 'janvier' : MONTHS[+U.period - 1].toLowerCase() }), ' sur les mois suivants.');
     const from = U.period === 'year' ? 0 : +U.period - 1;
     const thead = h('thead', null, h('tr', null, h('th', { text: 'Catégorie' }), ...MSHORT.map(m => h('th', { class: 'r', text: m })), h('th', { class: 'r', text: 'Total' }), h('th')));
     const tb = h('tbody');
@@ -1240,8 +1392,9 @@
     const setP = (g, c, arr) => { S.cfg.plan[y] = S.cfg.plan[y] || {}; S.cfg.plan[y][g] = S.cfg.plan[y][g] || {}; S.cfg.plan[y][g][c] = arr; };
     GROUPS.forEach((g, gi) => {
       const sums = MSHORT.map((_, i) => r2(S.cfg.categories[g].reduce((a, c) => a + (+P(g, c)[i] || 0), 0)));
-      tb.append(h('tr', { class: 'group' }, h('td', { text: g }), ...sums.map(v => h('td', { class: 'r num', text: fmt0.format(v) })), h('td', { class: 'r num', text: fmt0.format(sums.reduce((a, b) => a + b, 0)) }), h('td')));
-      S.cfg.categories[g].forEach((c, ci) => {
+      const open = !!U.planOpen[g];
+      tb.append(h('tr', { class: 'group plan-g' + (open ? ' open' : ''), onclick: () => { U.planOpen[g] = !open; renderPlan(); } }, h('td', null, h('button', { type: 'button', class: 'plan-tg', 'aria-expanded': String(open) }, h('span', { class: 'chev', 'aria-hidden': 'true', text: '›' }), g)), ...sums.map(v => h('td', { class: 'r num', text: fmt0.format(v) })), h('td', { class: 'r num', text: fmt0.format(sums.reduce((a, b) => a + b, 0)) }), h('td')));
+      if (open) S.cfg.categories[g].forEach((c, ci) => {
         const arr = P(g, c);
         const cells = MSHORT.map((_, i) => {
           const inp = h('input', { type: 'text', inputmode: 'decimal', id: `plan-${gi}-${ci}-${i}`, 'aria-label': `${c}, ${MONTHS[i]}`, value: numIn(+arr[i] || 0) });
@@ -1262,23 +1415,42 @@
 
   // ---------------------------------------------------------------- épargne & crédits
   function renderEpargne() {
+    const { fut } = balances();
+    const accs = S.cfg.accounts.filter(a => a.savings);
+    const total = r2(accs.reduce((s, a) => s + Math.max(0, fut[a.name]), 0));
     const sv = savingsByCat();
-    let total = 0, saved = 0, taken = 0;
-    const tb = h('tbody');
-    for (const g of S.cfg.goals) {
+    const tb = bm(todayStr()), cur = mIdx(tb.y, tb.m);
+    // rythme mensuel par catégorie d'épargne sur 3 mois complets
+    const pace = (cat) => { let s = 0; for (let k = 1; k <= 3; k++) { const { y, m } = ymOf(cur - k); for (const t of S.tx) { if (t.category !== cat) continue; const b = bm(t.date); if (b.y !== y || b.m !== m) continue; if (t.type === 'Épargnes') s += t.amount; if (t.type === "Reprise d'épargne") s -= t.amount; } } return s / 3; };
+    const over = $('ep-over');
+    const bar = h('div', { class: 'stack-bar', role: 'img', 'aria-label': 'Répartition de ton épargne par compte' }, ...accs.filter(a => fut[a.name] > 0).map(a => h('i', { style: `width:${fut[a.name] / (total || 1) * 100}%;background:${a.color}`, title: `${a.name} : ${money(fut[a.name])}` })));
+    const list = h('div', { class: 'ep-accs' }, ...accs.map(a => h('div', { class: 'ep-acc', style: `--ac:${a.color}` },
+      h('span', { class: 'acc-name' }, h('i', { class: 'tok', 'aria-hidden': 'true' }), a.name),
+      h('span', { class: 'num ep-share', text: total ? pct.format(Math.max(0, fut[a.name]) / total) : '' }),
+      h('span', { class: 'num ep-val' }, moneyEl(fut[a.name])))));
+    const goals = h('div', { class: 'goal-grid' }, ...S.cfg.goals.map(g => {
       const x = sv[g.category] || { start: g.start, saved: 0, taken: 0 };
-      const tot = r2(x.start + x.saved - x.taken); total += tot; saved += x.saved; taken += x.taken;
-      const prog = g.target ? tot / g.target : 0, rest = Math.max(0, r2(g.target - tot));
-      tb.append(h('tr', null, h('td', null, h('div', { text: g.category || '—' }), h('div', { class: 'desc', text: g.account })),
-        h('td', { class: 'r num', text: money(tot) }), h('td', { class: 'r num mut', text: money(g.target) }), h('td', { class: 'r num mut', text: money(rest) }),
-        h('td', { style: 'min-width:140px' }, h('div', { style: 'display:flex;gap:8px;align-items:center' }, h('div', { class: 'bar', style: 'flex:1' }, h('i', { style: `width:${Math.min(100, Math.max(0, prog * 100))}%;background:${prog >= 1 ? 'var(--ok)' : 'var(--plum)'}` })), h('span', { class: 'num', style: 'font-size:12px;min-width:44px;text-align:right', text: pct.format(prog) })))));
-    }
-    if (!S.cfg.goals.length) tb.append(h('tr', null, h('td', { colspan: 5, class: 'mut', style: 'padding:18px;text-align:center' }, 'Aucun objectif. ', h('button', { class: 'btn small', type: 'button', text: 'Créer un objectif', onclick: () => { U.settingsFocus = 'goals'; showTab('reglages'); } }))));
-    $('goals').replaceChildren(h('thead', null, h('tr', null, h('th', { text: 'Catégorie' }), h('th', { class: 'r', text: 'Total' }), h('th', { class: 'r', text: 'Objectif' }), h('th', { class: 'r', text: 'Reste' }), h('th', { text: 'Progression' }))), tb);
-    const startTot = S.cfg.goals.reduce((a, g) => a + g.start, 0);
-    const l = $('ep-lede'); l.replaceChildren();
-    if (S.cfg.goals.length) l.append('Tu as ', h('b', { text: money(r2(total)) }), ' sur tes objectifs, soit ', h('b', { text: sgn(r2(total - startTot)) }), ` depuis le départ (${money(r2(saved))} épargnés, ${money(r2(taken))} repris).`);
-    else l.append('Crée des objectifs d’épargne dans Réglages pour suivre leur progression ici.');
+      const tot = r2(x.start + x.saved - x.taken), prog = g.target ? Math.max(0, Math.min(1, tot / g.target)) : 0, rest = Math.max(0, r2(g.target - tot));
+      const pm = pace(g.category);
+      let eta = '';
+      if (rest <= 0) eta = 'Objectif atteint';
+      else if (pm > 1) { const n = Math.ceil(rest / pm); const { y, m } = ymOf(cur + n); eta = `À ce rythme (${money(pm)} par mois) : ${MONTHS[m - 1].toLowerCase()} ${y}`; }
+      else eta = 'Pas de versement ces 3 derniers mois';
+      return h('div', { class: 'goal' + (rest <= 0 ? ' done' : '') },
+        h('div', { class: 'goal-top' }, h('span', { class: 'goal-name', text: g.category || 'Objectif' }), h('span', { class: 'goal-pct num', text: pct.format(prog) })),
+        h('div', { class: 'goal-amt' }, moneyEl(tot), h('span', { class: 'goal-of', text: ` sur ${money(g.target)}` })),
+        h('div', { class: 'goal-bar' }, h('i', { style: `width:${prog * 100}%` })),
+        h('div', { class: 'goal-foot' }, h('span', { text: rest > 0 ? `Encore ${money(rest)}` : 'Bravo' }), h('span', { class: 'mut', text: eta })),
+        g.account ? h('div', { class: 'hint', text: `Sur ${g.account}` }) : null);
+    }));
+    over.replaceChildren(
+      h('div', { class: 'card ep-card' },
+        h('div', { class: 'ep-head' }, h('div', null, h('div', { class: 'hero-label', text: 'Ton épargne, tous comptes confondus' }), h('div', { class: 'ep-total num' }, moneyEl(total)))),
+        accs.length ? [bar, list] : h('p', { class: 'mut', text: 'Coche « Épargne » sur tes livrets et placements dans Réglages pour les voir ici.' })),
+      h('div', { class: 'card' },
+        h('div', { class: 'rec-head' }, h('div', null, h('h2', { text: 'Objectifs' }), h('p', { class: 'note', style: 'margin-bottom:0', text: S.cfg.goals.length ? 'Ce que tu as mis de côté pour chaque projet, et quand tu l’atteindras à ton rythme actuel.' : 'Fixe un montant à atteindre pour un projet : vacances, voiture, épargne de précaution…' })),
+          h('button', { class: 'btn', type: 'button', text: S.cfg.goals.length ? 'Gérer' : 'Créer un objectif', onclick: () => { U.setSec = 'goals'; showTab('reglages'); } })),
+        S.cfg.goals.length ? goals : null));
     drawEvo(); drawRate();
   }
   function drawEvo() {
@@ -1746,17 +1918,48 @@
           h('button', { class: 'btn small', type: 'button', text: 'Annuler', onclick: () => { U.confirmReset = false; render(); } })))
         : h('button', { class: 'btn danger', type: 'button', text: 'Tout effacer…', onclick: () => { U.confirmReset = true; render(); } }));
 
-    $('p-reglages').replaceChildren(h('div', { class: 'settings' },
-      sec('set-general', 'Général', 'Nom, devise, format et rythme de ton budget.', generalFields(S.cfg, on)),
-      sec('set-look', 'Apparence', null, lookEditor(S.cfg, on)),
-      sec('set-accounts', 'Comptes', 'Renommer un compte met à jour toutes ses transactions.', accountsEditor(S.cfg, on, true)),
-      sec('set-cats', 'Catégories', 'Renommer une catégorie met à jour ses transactions et ton prévisionnel. Une catégorie utilisée ne peut pas être supprimée.', categoriesEditor(S.cfg, on, true)),
-      sec('set-goals', 'Objectifs d’épargne', null, goalsEditor(S.cfg, on)),
-      sec('set-loans', 'Crédits & dettes', null, loansEditor(S.cfg, on)),
-      sec('set-share', 'Faire essayer l’app', 'Envoie ce lien : la personne part d’une app vide, avec ses propres données sur son appareil. Rien de ce que tu as saisi n’est partagé.', shareBox()),
-      sec('set-install', 'Installer sur cet appareil', `L’app fonctionne hors ligne une fois installée. Version ${APP_VERSION}.`, install),
-      sec('set-data', 'Données & sauvegardes', null, data)));
-    if (U.settingsFocus) { const el = $(U.settingsFocus === 'goals' ? 'set-goals' : 'set-loans'); U.settingsFocus = null; setTimeout(() => el?.scrollIntoView({ behavior: 'smooth' }), 30); }
+    const ICON = {
+      general: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+      look: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>',
+      accounts: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/>',
+      cats: '<path d="M4 7h7v7H4zM13 7h7v4h-7zM13 13h7v4h-7zM4 16h7v1H4z"/>',
+      goals: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
+      loans: '<path d="M4 18h16M6 18V9M10 18V9M14 18V9M18 18V9M3 9l9-5 9 5z"/>',
+      share: '<path d="M12 4v11M7 9l5-5 5 5M5 14v5h14v-5"/>',
+      install: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>',
+      data: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'
+    };
+    const themeLbl = { system: 'automatique', light: 'clair', dark: 'sombre' }[S.cfg.theme] || 'automatique';
+    const nCats = CAT_GROUPS.reduce((a, g) => a + S.cfg.categories[g].length, 0);
+    const SECTIONS = [
+      ['general', 'Général', `${S.cfg.appName}, ${S.cfg.currency}, mois au ${S.cfg.startDay}`, 'Nom, devise, format et rythme de ton budget.', () => generalFields(S.cfg, on)],
+      ['look', 'Apparence', `Thème ${themeLbl}`, null, () => lookEditor(S.cfg, on)],
+      ['accounts', 'Comptes', `${S.cfg.accounts.length} compte${S.cfg.accounts.length > 1 ? 's' : ''}`, 'Renommer un compte met à jour toutes ses transactions.', () => accountsEditor(S.cfg, on, true)],
+      ['cats', 'Catégories', `${nCats} catégories`, 'Renommer une catégorie met à jour ses transactions et ton prévisionnel. Une catégorie utilisée ne peut pas être supprimée.', () => categoriesEditor(S.cfg, on, true)],
+      ['goals', 'Objectifs d’épargne', S.cfg.goals.length ? `${S.cfg.goals.length} objectif${S.cfg.goals.length > 1 ? 's' : ''}` : 'Aucun', null, () => goalsEditor(S.cfg, on)],
+      ['loans', 'Crédits & dettes', S.cfg.loans.length ? `${S.cfg.loans.length} crédit${S.cfg.loans.length > 1 ? 's' : ''}` : 'Aucun', null, () => loansEditor(S.cfg, on)],
+      ['share', 'Faire essayer l’app', 'Lien à envoyer', 'Envoie ce lien : la personne part d’une app vide, avec ses propres données sur son appareil. Rien de ce que tu as saisi n’est partagé.', () => shareBox()],
+      ['install', 'Installer sur cet appareil', `Version ${APP_VERSION}`, 'L’app fonctionne hors ligne une fois installée.', () => install],
+      ['data', 'Données & sauvegardes', 'Exporter, restaurer, importer', null, () => data]
+    ];
+    if (U.settingsFocus) { U.setSec = U.settingsFocus; U.settingsFocus = null; }
+    const secDef = SECTIONS.find(s => s[0] === U.setSec);
+    if (secDef) {
+      const [, title, , note, body] = secDef;
+      $('p-reglages').replaceChildren(h('div', { class: 'settings set-detail' },
+        h('button', { class: 'backbtn', type: 'button', onclick: () => transition(() => { U.setSec = null; render(); window.scrollTo({ top: 0 }); }, 'back') },
+          h('span', { 'aria-hidden': 'true', text: '‹' }), 'Réglages'),
+        sec('set-' + secDef[0], title, note, body())));
+      return;
+    }
+    const row = ([id, title, summary]) => h('button', { class: 'set-row', type: 'button', onclick: () => transition(() => { U.setSec = id; render(); window.scrollTo({ top: 0 }); }, 'fwd') },
+      (() => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'set-ic'); s.setAttribute('aria-hidden', 'true'); s.innerHTML = ICON[id]; return s; })(),
+      h('span', { class: 'set-txt' }, h('span', { class: 'set-t', text: title }), h('span', { class: 'set-s', text: summary })),
+      h('span', { class: 'set-chev', 'aria-hidden': 'true', text: '›' }));
+    const group = (ids) => h('div', { class: 'set-group' }, ...SECTIONS.filter(s => ids.includes(s[0])).map(row));
+    $('p-reglages').replaceChildren(h('div', { class: 'settings set-menu' },
+      h('h2', { class: 'set-h', text: 'Réglages' }),
+      group(['general', 'look']), group(['accounts', 'cats', 'goals', 'loans']), group(['share', 'install', 'data'])));
   }
 
   // ---------------------------------------------------------------- import / export
@@ -1930,7 +2133,8 @@
     $('period').addEventListener('change', () => { U.period = $('period').value; if (U.tab === 'transactions' && !U.editing) resetForm(); render(); });
     $('year').addEventListener('change', () => { U.year = +$('year').value; if (U.tab === 'transactions' && !U.editing) resetForm(); render(); });
     document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
-    $('quickAdd').addEventListener('click', () => { showTab('transactions'); setTimeout(() => { const i = $('ex-in'); if (i) { i.focus(); i.scrollIntoView({ block: 'center' }); } }, 30); });
+    $('toAnalyse').addEventListener('click', () => transition(() => { U.sub.apercu = 'analyse'; render(); window.scrollTo({ top: 0 }); }, 'fwd'));
+    $('quickAdd').addEventListener('click', () => { U.sub.transactions = 'ops'; showTab('transactions'); setTimeout(() => { const i = $('ex-in'); if (i) { i.focus(); i.scrollIntoView({ block: 'center' }); } }, 30); });
     $('f-type').addEventListener('change', () => { refreshFormOptions(); applyDefaults(); });
     $('f-cat').addEventListener('change', () => applyDefaults(true));
     $('txf').addEventListener('submit', onSubmit);
