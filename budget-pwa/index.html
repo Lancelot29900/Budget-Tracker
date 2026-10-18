@@ -5,18 +5,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Focale</title>
 <meta name="description" content="Suivi de budget personnel : comptes, transactions, prévisionnel, épargne et crédits. Fonctionne hors ligne, données gardées sur l'appareil.">
-<meta name="theme-color" content="#F4F3EF" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0F0F10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#EEF1F4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B1218" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Focale">
-<link rel="manifest" href="manifest.webmanifest?v=1.6.0">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=1.6.0">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.6.0">
-<link rel="stylesheet" href="styles.css?v=1.6.0">
+<link rel="manifest" href="manifest.webmanifest?v=1.8.0">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=1.8.0">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.8.0">
+<link rel="stylesheet" href="styles.css?v=1.8.0">
 </head>
 <body>
+<a class="skip" href="#main">Aller au contenu</a>
 <div class="wrap">
   <header class="top" id="top" hidden>
     <div class="toprow">
@@ -109,7 +110,7 @@
             <label>Catégorie<select id="f-cat"></select></label>
             <label>Depuis<select id="f-from"></select></label>
             <label>Vers<select id="f-to"></select></label>
-            <label class="full">Description<input type="text" id="f-desc" placeholder="Optionnel" autocomplete="off"></label>
+            <label class="full">Description<input type="text" id="f-desc" placeholder="Facultatif, ex. boulangerie…" autocomplete="off"></label>
             <label class="check full"><input type="checkbox" id="f-pointed" checked> Pointée (déjà passée sur le compte)</label>
             <div class="err" id="f-err" role="alert"></div>
             <div class="row">
@@ -123,7 +124,7 @@
           <h2 id="list-title">Transactions</h2>
           <p class="note" id="list-note"></p>
           <div class="filters">
-            <input type="search" id="q" placeholder="Rechercher (catégorie, description, montant…)" aria-label="Rechercher">
+            <input type="search" id="q" placeholder="Rechercher une catégorie, un montant…" aria-label="Rechercher">
             <select id="ft" aria-label="Type"></select>
             <select id="fa" aria-label="Compte"></select>
             <select id="fp" aria-label="Pointage"><option value="">Pointées ou non</option><option value="0">Non pointées</option><option value="1">Pointées</option></select>
@@ -168,7 +169,7 @@
 <div id="toast" class="toast" role="status" hidden></div>
 <input type="file" id="fileJson" accept="application/json,.json" hidden>
 <input type="file" id="fileCsv" accept=".csv,text/csv,text/plain" hidden>
-<script src="app.js?v=1.6.0"></script>
+<script src="app.js?v=1.8.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
