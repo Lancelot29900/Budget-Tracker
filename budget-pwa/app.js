@@ -5,7 +5,7 @@
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '1.9.0';
+  const APP_VERSION = '2.0.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -109,12 +109,12 @@
     cfg.plan = cfg.plan && typeof cfg.plan === 'object' ? cfg.plan : {};
     // ancien format : plan sans année
     if (cfg.plan.Revenus || cfg.plan.Factures || cfg.plan['Dépenses'] || cfg.plan['Épargnes']) cfg.plan = { [cfg.year]: cfg.plan };
-    cfg.goals = (Array.isArray(cfg.goals) ? cfg.goals : []).map(g => ({ id: g.id || uid(), category: g.category || '', account: g.account || '', start: r2(g.start), target: r2(g.target) }));
+    cfg.goals = (Array.isArray(cfg.goals) ? cfg.goals : []).map(g => ({ id: g.id || uid(), category: g.category || '', account: g.account || '', start: r2(g.start), target: r2(g.target), ...(typeof g.photo === 'string' && g.photo.startsWith('data:image/') ? { photo: g.photo } : {}) }));
     cfg.loans = (Array.isArray(cfg.loans) ? cfg.loans : []).map(l => ({ id: l.id || uid(), name: l.name || 'Crédit', category: l.category || '', capital: r2(l.capital), interest: r2(l.interest), months: parseInt(l.months, 10) || 0, rate: +l.rate || 0, monthly: r2(l.monthly), paidBefore: r2(l.paidBefore), startDate: /^\d{4}-\d{2}$/.test(l.startDate || '') ? l.startDate : '' }));
     cfg.recurring = (Array.isArray(cfg.recurring) ? cfg.recurring : []).filter(r => r && TYPES.includes(r.type)).map(r => ({
       id: r.id || uid(), label: String(r.label || ''), type: r.type, category: String(r.category || ''), from: String(r.from || 'Externe'), to: String(r.to || 'Externe'),
       amount: r2(r.amount), day: Math.min(31, Math.max(1, parseInt(r.day, 10) || 1)), every: [1, 2, 3, 6, 12].includes(+r.every) ? +r.every : 1,
-      start: /^\d{4}-\d{2}$/.test(r.start || '') ? r.start : todayStr().slice(0, 7), end: /^\d{4}-\d{2}$/.test(r.end || '') ? r.end : '', pointed: !!r.pointed, active: r.active !== false, skip: Array.isArray(r.skip) ? r.skip.filter(k => /^\d{4}-\d{2}$/.test(k)) : [] }));
+      start: /^\d{4}-\d{2}$/.test(r.start || '') ? r.start : todayStr().slice(0, 7), end: /^\d{4}-\d{2}$/.test(r.end || '') ? r.end : '', pointed: !!r.pointed, active: r.active !== false, ...(r.logo ? { logo: String(r.logo) } : {}), skip: Array.isArray(r.skip) ? r.skip.filter(k => /^\d{4}-\d{2}$/.test(k)) : [] }));
     cfg.dismissed = Array.isArray(cfg.dismissed) ? cfg.dismissed.map(String) : [];
     cfg.autoRecurring = !!cfg.autoRecurring;
     const tx = (Array.isArray(data.tx) ? data.tx : []).filter(t => t && /^\d{4}-\d{2}-\d{2}$/.test(t.date) && +t.amount > 0).map(t => ({
@@ -406,37 +406,74 @@
     if (isoOf(d) <= today) d = at(n.getFullYear(), n.getMonth() + 1);
     return { date: isoOf(d), label: inc.description || inc.category };
   }
+  // ---------------------------------------------------------------- calendrier du mois, avec les échéances
+  const compact = (v) => { const a = Math.abs(v); return a >= 1000 ? `${num2.format(Math.round(a / 100) / 10).replace(/,0$/, '')} k` : String(Math.round(a)); };
+  function monthItems() {
+    const today = todayStr(), tb = bm(today);
+    const curAcc = new Set((S.cfg.accounts.some(a => a.current) ? S.cfg.accounts.filter(a => a.current) : S.cfg.accounts.filter(a => !a.savings)).map(a => a.name));
+    const sign = (x) => curAcc.has(x.to) && !curAcc.has(x.from) ? 1 : curAcc.has(x.from) && !curAcc.has(x.to) ? -1 : 0;
+    const items = [];
+    for (const st of recurStatus(tb.y, tb.m)) {
+      const s = sign(st.r); if (!s) continue;
+      items.push({ date: st.date, label: st.r.label || st.r.category, amount: s * st.r.amount, x: { ...st.r, description: st.r.label }, state: st.done ? 'done' : st.skipped ? 'skip' : 'plan' });
+    }
+    for (const t of S.tx) {
+      if (t.recurId || t.pointed) continue;
+      const b = bm(t.date); if (b.y !== tb.y || b.m !== tb.m) continue;
+      const s = sign(t); if (!s) continue;
+      items.push({ date: t.date, label: t.description || t.category, amount: s * t.amount, x: t, state: 'pending' });
+    }
+    const pay = nextPayday();
+    if (pay && !items.some(i => i.date === pay.date && i.amount > 0)) items.push({ date: pay.date, label: pay.label, amount: 0, x: { category: 'Salaire', type: 'Revenus', description: pay.label }, state: 'guess' });
+    return { items, pay };
+  }
   function renderMonthCal() {
     const box = $('cal'); if (!box) return;
     const today = todayStr(), tb = bm(today);
     const [st, en] = monthRange(tb.y, tb.m);
-    const pay = nextPayday();
-    // jours où quelque chose doit encore sortir des comptes courants
-    const curAcc = new Set((S.cfg.accounts.some(a => a.current) ? S.cfg.accounts.filter(a => a.current) : S.cfg.accounts.filter(a => !a.savings)).map(a => a.name));
-    const outDays = new Set();
-    for (const t of S.tx) if (!t.pointed && t.date >= today && curAcc.has(t.from) && !curAcc.has(t.to)) outDays.add(t.date);
-    for (const x of recurStatus(tb.y, tb.m)) if (!x.done && x.date >= today && curAcc.has(x.r.from) && x.r.type !== 'Revenus') outDays.add(x.date);
-    const grid = h('div', { class: 'cal-grid', role: 'grid' });
+    const { items, pay } = monthItems();
+    const byDay = new Map();
+    for (const it of items) { if (!byDay.has(it.date)) byDay.set(it.date, []); byDay.get(it.date).push(it); }
+    const grid = h('div', { class: 'cal-grid' });
     for (const d of ['L', 'M', 'M', 'J', 'V', 'S', 'D']) grid.append(h('span', { class: 'cal-wd', 'aria-hidden': 'true', text: d }));
-    const first = new Date(st); const lead = (first.getDay() + 6) % 7;
+    const lead = (new Date(st).getDay() + 6) % 7;
     for (let i = 0; i < lead; i++) grid.append(h('span'));
     for (let d = new Date(st); d <= en; d.setDate(d.getDate() + 1)) {
-      const iso = isoOf(d);
-      const cls = ['cal-d', iso < today ? 'past' : iso === today ? 'today' : 'next', pay && pay.date === iso ? 'pay' : '', outDays.has(iso) ? 'out' : ''].filter(Boolean).join(' ');
-      grid.append(h('span', { class: cls, title: pay && pay.date === iso ? `${pay.label} attendu` : outDays.has(iso) ? 'Prélèvement prévu' : null }, String(d.getDate())));
+      const iso = isoOf(d), its = (byDay.get(iso) || []).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+      const net = its.reduce((s, i) => s + i.amount, 0);
+      const cls = ['cal-d', iso < today ? 'past' : iso === today ? 'today' : 'next', its.length ? 'has' : '', U.calDay === iso ? 'sel' : ''].filter(Boolean).join(' ');
+      const cell = h('button', { type: 'button', class: cls, 'aria-label': `${d.getDate()} ${MONTHS[d.getMonth()].toLowerCase()}${its.length ? `, ${its.length} opération${its.length > 1 ? 's' : ''}` : ''}`, onclick: () => { U.calDay = U.calDay === iso ? null : iso; renderMonthCal(); } },
+        h('span', { class: 'cal-n', text: String(d.getDate()) }));
+      if (its.length) {
+        const main = its[0];
+        cell.append(h('span', { class: 'cal-ic' }, itemIcon(main.x, 'xs'), its.length > 1 ? h('span', { class: 'cal-more', text: `+${its.length - 1}` }) : null),
+          net ? h('span', { class: 'cal-amt ' + (net > 0 ? 'pos' : ''), text: (net > 0 ? '+' : '−') + compact(net) }) : h('span', { class: 'cal-amt mut', text: 'paie' }));
+      }
+      grid.append(cell);
+    }
+    // détail du jour touché
+    let detail = null;
+    if (U.calDay && byDay.has(U.calDay)) {
+      const dd = new Date(U.calDay + 'T00:00:00');
+      detail = h('div', { class: 'cal-detail' },
+        h('div', { class: 'cal-detail-t', text: dd.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) }),
+        ...byDay.get(U.calDay).map(it => h('div', { class: 'cal-it' }, itemIcon(it.x, 'sm'), h('span', { class: 'cal-it-l' }, h('span', { text: it.label }), h('span', { class: 'hint', text: { done: 'en place', skip: 'passée ce mois', plan: U.calDay < today ? 'à reporter' : 'prévue', pending: 'en attente de pointage', guess: 'date habituelle' }[it.state] })),
+          h('span', { class: 'num ' + (it.amount > 0 ? 'pos' : ''), text: it.amount ? sgn(it.amount) : '' }))));
     }
     const left = Math.max(0, Math.round((en - new Date(today + 'T00:00:00')) / 864e5));
     let line;
     if (pay) {
-      const dd = Math.max(1, Math.round((new Date(pay.date + 'T00:00:00') - new Date(today + 'T00:00:00')) / 864e5));
+      const dn = Math.max(1, Math.round((new Date(pay.date + 'T00:00:00') - new Date(today + 'T00:00:00')) / 864e5));
       const when = new Date(pay.date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
-      line = [h('b', { text: dd === 1 ? 'Demain' : `Dans ${dd} jours` }), ` : ${pay.label.toLowerCase() === 'salaire' ? 'ton salaire' : pay.label}, le ${when}.`];
+      line = [h('b', { text: dn === 1 ? 'Demain' : `Dans ${dn} jours` }), ` : ${normTxt(pay.label) === 'salaire' ? 'ton salaire' : pay.label}, le ${when}.`];
     } else line = [h('b', { text: left ? `${left} jour${left > 1 ? 's' : ''}` : 'Dernier jour' }), left ? ' avant le mois suivant.' : ' du mois.'];
-    const legend = h('div', { class: 'cal-legend' },
-      pay && pay.date <= isoOf(en) ? h('span', null, h('i', { class: 'lg pay' }), 'rentrée') : null,
-      outDays.size ? h('span', null, h('i', { class: 'lg out' }), 'prélèvement prévu') : null);
+    const upcoming = items.filter(i => i.date >= today && i.amount < 0 && i.state !== 'done' && i.state !== 'skip');
     const title = new Date(st.getTime() + 10 * 864e5).toLocaleDateString('fr-FR', { month: 'long' });
-    box.replaceChildren(h('div', { class: 'cal-top' }, h('span', { class: 'cal-title', text: title.charAt(0).toUpperCase() + title.slice(1) })), grid, h('p', { class: 'cal-line' }, ...line), legend.childNodes.length ? legend : '');
+    box.replaceChildren(
+      h('div', { class: 'cal-top' }, h('span', { class: 'cal-title', text: title.charAt(0).toUpperCase() + title.slice(1) }),
+        upcoming.length ? h('span', { class: 'cal-sum hint', text: `${sgn(r2(upcoming.reduce((s, i) => s + i.amount, 0)))} à venir` }) : null),
+      grid, detail || '', h('p', { class: 'cal-line' }, ...line),
+      !S.cfg.recurring.length ? h('p', { class: 'hint cal-tip' }, 'Ajoute tes récurrentes pour voir tes échéances ici. ', h('button', { class: 'linkbtn', type: 'button', text: 'Les ajouter', onclick: () => { U.sub.transactions = 'recur'; showTab('transactions'); } })) : '');
   }
   // ---------------------------------------------------------------- aperçu
   function prevPeriod() {
@@ -490,7 +527,8 @@
     const totFut = r2(list.reduce((s, a) => s + fut[a.name], 0));
     const now = new Date();
     box.append(h('div', { class: 'hero-label', text: `Disponible sur tes comptes courants, le ${now.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}` }),
-      h('div', { class: 'hero-num num' + (totReal < 0 ? ' neg' : '') }, moneyEl(totReal)));
+      h('div', { class: 'hero-num num' + (totReal < 0 ? ' neg' : ''), id: 'hero-num' }, moneyEl(U.heroLast ?? totReal)));
+    { const el = box.lastChild, from = U.heroLast ?? totReal * 0.92; U.heroLast = totReal; if (!reduceMotion() && Math.abs(from - totReal) > 0.004) { const t0 = performance.now(), dur = 650; const step = (t) => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.replaceChildren(moneyEl(k < 1 ? from + (totReal - from) * e : totReal)); if (k < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); } else el.replaceChildren(moneyEl(totReal)); }
     // un chip par compte courant
     const chips = h('div', { class: 'acc-chips' });
     for (const a of list) {
@@ -606,7 +644,7 @@
     $('top-note').textContent = `Les achats les plus importants de ${periodLabel()}.`;
     const tl = h('div', { class: 'toplist' });
     for (const x of top) tl.append(h('div', { class: 'toprow-i' },
-      h('div', { style: 'min-width:0' }, h('div', { text: x.description || x.category }), h('div', { class: 'desc', text: `${x.category}, le ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}` })),
+      h('div', { style: 'min-width:0' }, h('div', { class: 't-line' }, itemIcon(x, 'xs'), h('span', { text: x.description || x.category })), h('div', { class: 'desc', text: `${x.category}, le ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}` })),
       h('span', { class: 'num', text: money(x.amount) }),
       h('div', { class: 'bar' }, h('i', { style: `width:${x.amount / top[0].amount * 100}%;background:var(--ochre)` }))));
     $('top-spend').replaceChildren(top.length ? tl : h('p', { class: 'mut', text: 'Aucune dépense sur cette période.' }));
@@ -932,7 +970,7 @@
       tb.append(h('tr', { class: (t.pointed ? '' : 'unpointed') + ' acc-row', style: mainA !== 'Externe' ? `--ac:${accColor(mainA)}` : null },
         h('td', { class: 't-cb' }, cb),
         h('td', { class: 'num t-date', text: `${t.date.slice(8, 10)}/${t.date.slice(5, 7)}` }),
-        h('td', { class: 't-main' }, h('div', null, typeChip(t.type), ' ', t.category), h('div', { class: 'desc tx-accs' }, ...[t.description ? h('span', { class: 'tx-desc', text: t.description }) : null, accPill(t.from), h('span', { class: 'arr', text: '→' }), accPill(t.to)].filter(Boolean))),
+        h('td', { class: 't-main' }, h('div', { class: 't-line' }, itemIcon(t, 'sm'), h('span', { class: 't-cat', text: t.category }), ['Dépenses', 'Factures', 'Revenus'].includes(t.type) ? null : typeChip(t.type)), h('div', { class: 'desc tx-accs' }, ...[t.description ? h('span', { class: 'tx-desc', text: t.description }) : null, accPill(t.from), h('span', { class: 'arr', text: '→' }), accPill(t.to)].filter(Boolean))),
         h('td', { class: 'r num t-amt ' + (sg > 0 ? 'pos' : '') }, ...[(sg > 0 ? '+' : sg < 0 ? '−' : '') + money(t.amount), fa ? h('div', { class: 'run-bal' + (run[t.id] < 0 ? ' neg' : ''), text: 'solde ' + money(run[t.id]) }) : null].filter(Boolean)),
         h('td', { class: 't-acts' }, acts)));
     }
@@ -1080,7 +1118,7 @@
     auto.addEventListener('change', () => { S.cfg.autoRecurring = auto.checked; if (auto.checked) autoPostRecurring(); commit(); });
     const head = h('div', { class: 'rec-head' },
       h('div', null, h('h2', { text: 'Opérations récurrentes' }), h('p', { class: 'note', style: 'margin-bottom:0', text: 'Salaire, loyer, abonnements, virements d’épargne : définis-les une fois, l’app les prépare chaque mois.' })),
-      h('label', { class: 'switch-row' }, h('span', null, 'Report automatique'), auto));
+      h('div', { class: 'rec-tools' }, h('button', { class: 'btn', type: 'button', text: '+ Abonnements', onclick: openSubscriptionPicker }), h('label', { class: 'switch-row' }, h('span', null, 'Report automatique'), auto)));
     const parts = [head];
     if (p && S.cfg.recurring.length) {
       const st = recurStatus(y, p);
@@ -1105,7 +1143,7 @@
               h('button', { class: 'btn small', type: 'button', text: 'Reporter', onclick: () => { postRecurring([x], y, p); commit(); } }));
           return h('div', { class: 'rec-row' + (x.done || x.skipped ? ' settled' : '') },
             h('span', { class: 'rec-day num', text: String(+x.date.slice(8, 10)) }),
-            h('div', { class: 'rec-what' }, h('div', { class: 'rec-lbl', text: x.r.label || x.r.category }), h('div', { class: 'desc', text: `${x.r.category}, ${x.r.from === 'Externe' ? 'vers ' + x.r.to : 'depuis ' + x.r.from}` })),
+            h('div', { class: 'rec-what' }, h('div', { class: 'rec-lbl t-line' }, itemIcon({ ...x.r, description: x.r.label }, 'sm'), h('span', { text: x.r.label || x.r.category })), h('div', { class: 'desc', text: `${x.r.category}, ${x.r.from === 'Externe' ? 'vers ' + x.r.to : 'depuis ' + x.r.from}` })),
             h('span', { class: 'num rec-amt' + (sign === '+' ? ' pos' : ''), text: sign + money(x.r.amount) }), state);
         };
         const list = h('div', { class: 'rec-list' }, ...st.sort((a, b) => a.date.localeCompare(b.date)).map(row));
@@ -1120,7 +1158,7 @@
     if (sugg.length) {
       const sl = h('div', { class: 'sugg' });
       sugg.forEach((sg, i) => sl.append(h('div', { class: 'sugg-row' },
-        h('div', { class: 'rec-what' }, h('div', { class: 'rec-lbl' }, typeChip(sg.type), ' ', sg.label), h('div', { class: 'desc', text: `Vers le ${sg.day} de chaque mois, vue ${sg.months} mois sur 4` })),
+        h('div', { class: 'rec-what' }, h('div', { class: 'rec-lbl t-line' }, itemIcon({ ...sg, description: sg.label }, 'sm'), h('span', { text: sg.label })), h('div', { class: 'desc', text: `Vers le ${sg.day} de chaque mois, vue ${sg.months} mois sur 4` })),
         h('span', { class: 'num rec-amt', text: money(sg.amount) }),
         h('span', { class: 'rec-acts' },
           h('button', { class: 'btn small ghost', type: 'button', text: 'Ignorer', onclick: () => { S.cfg.dismissed.push(suggKey(sg)); commit(); } }),
@@ -1181,6 +1219,268 @@
   const TO_SORT = 'À classer';
   const normTxt = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
   const capFirst = (x) => x ? x.charAt(0).toUpperCase() + x.slice(1) : x;
+  // ---------------------------------------------------------------- icônes de catégories et logos des services
+  /** Pictogrammes maison, trait de 1,8 px sur une grille de 24. */
+  const GLYPHS = {
+    home: '<path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10v9h11v-9"/><path d="M10 19v-5h4v5"/>',
+    cart: '<path d="M3.5 5h2l2.2 10h9.6l1.9-7H7"/><circle cx="9.5" cy="19" r="1.3"/><circle cx="16.5" cy="19" r="1.3"/>',
+    food: '<path d="M7 4v7a2 2 0 0 0 2 2v7M11 4v7a2 2 0 0 1-2 2M9 4v5"/><path d="M16.5 20V4c-2 1.2-3 3.5-3 6.5V13h3"/>',
+    bag: '<path d="M5.5 8h13l-1 12h-11z"/><path d="M9 10V7a3 3 0 0 1 6 0v3"/>',
+    car: '<path d="M5 16V12l1.8-4.5h10.4L19 12v4"/><path d="M4 16h16v2.5H4z"/><circle cx="8" cy="13.2" r=".9"/><circle cx="16" cy="13.2" r=".9"/>',
+    fuel: '<path d="M6 20V5.5A1.5 1.5 0 0 1 7.5 4h6A1.5 1.5 0 0 1 15 5.5V20"/><path d="M5 20h11M8 8h5"/><path d="M15 10h1.5a1.5 1.5 0 0 1 1.5 1.5V16a1.5 1.5 0 0 0 3 0V9l-2.5-2.5"/>',
+    health: '<path d="M12 19.5s-7-4.3-7-9.5a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.2-7 9.5-7 9.5z"/><path d="M9.5 11h5M12 8.5v5"/>',
+    fun: '<path d="M4 9a2 2 0 0 0 0 4v3h16v-3a2 2 0 0 1 0-4V6H4z"/><path d="M14 6v10" stroke-dasharray="1.5 2"/>',
+    plane: '<path d="M10.5 13.5 4 11l1.2-1.2 7.3.5 3.8-3.8a1.6 1.6 0 0 1 2.3 2.3l-3.8 3.8.5 7.3-1.2 1.2-2.5-6.5-3 3v2.2l-1 1-1.2-2.8-2.8-1.2 1-1H7.5z"/>',
+    repeat: '<path d="M17 4.5 19.5 7 17 9.5"/><path d="M4.5 12V10a3 3 0 0 1 3-3h12"/><path d="M7 19.5 4.5 17 7 14.5"/><path d="M19.5 12v2a3 3 0 0 1-3 3h-12"/>',
+    phone: '<rect x="7" y="3.5" width="10" height="17" rx="2.2"/><path d="M11 17.5h2"/>',
+    shield: '<path d="M12 3.5 5 6v5.5c0 4.3 3 7.6 7 9 4-1.4 7-4.7 7-9V6z"/><path d="m9.2 12 2 2 3.8-3.8"/>',
+    bank: '<path d="M3.5 9.5 12 4.5l8.5 5"/><path d="M5.5 10v7M9.8 10v7M14.2 10v7M18.5 10v7M4 19.5h16"/>',
+    work: '<rect x="3.5" y="7.5" width="17" height="11.5" rx="2"/><path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5M3.5 12.5h17"/>',
+    piggy: '<path d="M5 12.5a6.5 5.5 0 0 1 11.6-3.4L19 8.5v3l1 .8v2.4l-1.6.3a6.6 6.6 0 0 1-2.4 2.6V20h-2.5v-1.6a8 8 0 0 1-3.5 0V20H7.5v-2.6A5.4 5.4 0 0 1 5 12.5z"/><circle cx="15" cy="11.3" r=".8"/>',
+    gift: '<rect x="4" y="9" width="16" height="4" rx="1"/><path d="M5.5 13v7h13v-7M12 9v11"/><path d="M12 9c-1-3-5-4-5-1.5S12 9 12 9zM12 9c1-3 5-4 5-1.5S12 9 12 9z"/>',
+    sport: '<path d="M6.5 8v8M17.5 8v8M4 10v4M20 10v4M6.5 12h11"/>',
+    card: '<rect x="3.5" y="6" width="17" height="12" rx="2"/><path d="M3.5 10h17M7 14.5h4"/>',
+    bolt: '<path d="M13 3.5 6 13.5h5.5L10.5 20.5 18 10h-5.5z"/>',
+    tax: '<path d="M7 3.5h10v17l-2.5-1.6-2.5 1.6-2.5-1.6L7 20.5z"/><path d="M10 8.5h4M10 12h4"/>',
+    transfer: '<path d="M5 8.5h13M15 5.5l3 3-3 3"/><path d="M19 15.5H6M9 12.5l-3 3 3 3"/>',
+    cash: '<rect x="3.5" y="6.5" width="17" height="11" rx="2"/><circle cx="12" cy="12" r="2.4"/>',
+    book: '<path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19"/>',
+    pet: '<circle cx="8" cy="9" r="1.6"/><circle cx="16" cy="9" r="1.6"/><circle cx="5.5" cy="13" r="1.4"/><circle cx="18.5" cy="13" r="1.4"/><path d="M12 12.5c-2.5 0-4.5 2.8-4.5 4.5 0 1.6 1.5 2.3 2.6 1.9 1.2-.4 2.6-.4 3.8 0 1.1.4 2.6-.3 2.6-1.9 0-1.7-2-4.5-4.5-4.5z"/>',
+    tag: '<path d="M4 12.5V5.5A1.5 1.5 0 0 1 5.5 4h7l7.5 7.5-8 8z"/><circle cx="8.5" cy="8.5" r="1.3"/>',
+    question: '<circle cx="12" cy="12" r="8"/><path d="M9.8 9.6a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .8-1 1.5v.4M12 16.6v.2"/>'
+  };
+  // hues sobres, lisibles en clair comme en sombre
+  const GLYPH_HUE = { home: '#5B7BD5', cart: '#3E9B6E', food: '#D0743C', bag: '#B65A8C', car: '#4F8FB8', fuel: '#4F8FB8', health: '#D25563', fun: '#8C6BD1', plane: '#2E9DA8', repeat: '#6C7A89', phone: '#4A90C2', shield: '#5C7FA3', bank: '#62708A', work: '#2F8A5B', piggy: '#2F8A78', gift: '#C46A9A', sport: '#C0803A', card: '#6C7A89', bolt: '#C59A2A', tax: '#7A6F5C', transfer: '#6C7A89', cash: '#3E9B6E', book: '#8A6D3B', pet: '#A8763E', tag: '#7D8794', question: '#9AA3AD' };
+  const GLYPH_RULES = [
+    [/loyer|logement|immobilier|maison|appart|charges? (de )?copro/, 'home'],
+    [/course|supermarch|alimentation|epicerie|marche/, 'cart'],
+    [/restau|sortie|bar|cafe|fast|uber eats|deliveroo|repas/, 'food'],
+    [/shopping|vetement|habit|achat|mode|beaute/, 'bag'],
+    [/essence|carburant|peage|recharge/, 'fuel'],
+    [/transport|voiture|auto|train|bus|metro|navigo|parking|velo|moto|loa|entretien/, 'car'],
+    [/sante|medecin|pharma|mutuelle|dentiste|optique|soin|secu/, 'health'],
+    [/loisir|cinema|jeu|concert|culture|divertissement|streaming/, 'fun'],
+    [/vacance|voyage|hotel|avion/, 'plane'],
+    [/abonnement|souscription/, 'repeat'],
+    [/telephone|forfait|internet|box|mobile/, 'phone'],
+    [/assurance/, 'shield'],
+    [/pret|credit|emprunt|dette|banque|bancaire|frais/, 'bank'],
+    [/salaire|paie|prime|revenu|freelance|facture client|vente/, 'work'],
+    [/epargne|livret|placement|bourse|pea|cto|assurance.vie|investi|urgence/, 'piggy'],
+    [/cadeau|don|anniversaire|noel/, 'gift'],
+    [/sport|salle|fitness|gym|club/, 'sport'],
+    [/carte/, 'card'],
+    [/electric|energie|gaz|eau|edf|engie/, 'bolt'],
+    [/impot|taxe|amende/, 'tax'],
+    [/virement|transfert/, 'transfer'],
+    [/cash|liquide|retrait/, 'cash'],
+    [/livre|ecole|formation|etude|abonnement presse/, 'book'],
+    [/animal|chat|chien|veterinaire/, 'pet'],
+    [/a classer/, 'question']
+  ];
+  function glyphFor(category, type) {
+    const n = normTxt(category);
+    for (const [re, g] of GLYPH_RULES) if (re.test(n)) return g;
+    if (type === 'Revenus') return 'work';
+    if (type === 'Épargnes' || type === "Reprise d'épargne") return 'piggy';
+    if (type === 'Transfert de fonds') return 'transfer';
+    return 'tag';
+  }
+  function svgEl(inner, cls) {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true'); if (cls) s.setAttribute('class', cls);
+    s.innerHTML = inner; return s;
+  }
+  /** Services connus : nom affiché, domaine pour le logo, mots-clés reconnus dans les libellés. */
+  const SERVICES = [
+    ['Netflix', 'netflix.com', 'netflix'], ['Spotify', 'spotify.com', 'spotify'], ['Disney+', 'disneyplus.com', 'disney'],
+    ['Amazon Prime', 'amazon.fr', 'amazon prime|prime amazon|amazon'], ['Prime Video', 'primevideo.com', 'prime video'],
+    ['YouTube Premium', 'youtube.com', 'youtube'], ['Apple Music', 'music.apple.com', 'apple music'], ['Apple TV+', 'tv.apple.com', 'apple tv'],
+    ['iCloud+', 'icloud.com', 'icloud'], ['Apple One', 'apple.com', 'apple one'], ['Deezer', 'deezer.com', 'deezer'], ['Canal+', 'canalplus.com', 'canal'],
+    ['Max', 'max.com', 'hbo|hbo max'], ['Paramount+', 'paramountplus.com', 'paramount'], ['Crunchyroll', 'crunchyroll.com', 'crunchyroll'],
+    ['Twitch', 'twitch.tv', 'twitch'], ['Molotov', 'molotov.tv', 'molotov'], ['Google One', 'one.google.com', 'google one|google storage'],
+    ['Microsoft 365', 'microsoft.com', 'microsoft|office 365'], ['Dropbox', 'dropbox.com', 'dropbox'], ['Adobe', 'adobe.com', 'adobe|photoshop|lightroom'],
+    ['Canva', 'canva.com', 'canva'], ['Notion', 'notion.so', 'notion'], ['ChatGPT Plus', 'openai.com', 'chatgpt|openai'], ['Claude', 'claude.ai', 'claude ai|anthropic'],
+    ['PlayStation Plus', 'playstation.com', 'playstation|psn|ps plus'], ['Xbox Game Pass', 'xbox.com', 'xbox|game pass'], ['Nintendo Online', 'nintendo.com', 'nintendo'],
+    ['Audible', 'audible.fr', 'audible'], ['Kindle Unlimited', 'amazon.fr', 'kindle'], ['Duolingo', 'duolingo.com', 'duolingo'], ['Strava', 'strava.com', 'strava'],
+    ['Nolio', 'nolio.io', 'nolio'], ['Headspace', 'headspace.com', 'headspace'], ['Basic-Fit', 'basic-fit.com', 'basic fit|basicfit'], ['Fitness Park', 'fitnesspark.fr', 'fitness park'],
+    ['Uber One', 'uber.com', 'uber'], ['Deliveroo', 'deliveroo.fr', 'deliveroo'], ['Le Monde', 'lemonde.fr', 'le monde'], ['L’Équipe', 'lequipe.fr', 'lequipe'],
+    ['Sosh', 'sosh.fr', 'sosh'], ['Orange', 'orange.fr', 'orange'], ['Free', 'free.fr', 'free mobile|freebox|free'], ['SFR', 'sfr.fr', 'sfr'], ['RED by SFR', 'red-by-sfr.fr', 'red by sfr'],
+    ['Bouygues Telecom', 'bouyguestelecom.fr', 'bouygues|b and you'], ['EDF', 'edf.fr', 'edf'], ['Engie', 'engie.fr', 'engie'], ['TotalEnergies', 'totalenergies.fr', 'total energies|totalenergies'],
+    ['MAIF', 'maif.fr', 'maif'], ['MACIF', 'macif.fr', 'macif'], ['AXA', 'axa.fr', 'axa'], ['Matmut', 'matmut.fr', 'matmut'], ['Allianz', 'allianz.fr', 'allianz'], ['Groupama', 'groupama.fr', 'groupama'],
+    ['Alan', 'alan.com', 'alan sante|alan assurance'], ['BoursoBank', 'boursobank.com', 'bourso'], ['Crédit Mutuel de Bretagne', 'cmb.fr', 'cmb'], ['Revolut', 'revolut.com', 'revolut'], ['Trade Republic', 'traderepublic.com', 'trade republic'],
+    ['Naolib', 'naolib.fr', 'naolib'], ['SNCF Connect', 'sncf-connect.com', 'sncf|tgv|ouigo'], ['Navigo', 'iledefrance-mobilites.fr', 'navigo'], ['Lime', 'li.me', 'lime trottinette']
+  ].map(([name, domain, keys]) => ({ name, domain, re: new RegExp('(^| )(' + keys + ')( |$)') }));
+  function serviceFor(text) {
+    const n = normTxt(text); if (!n) return null;
+    return SERVICES.find(s => s.re.test(n)) || null;
+  }
+  const logoUrl = (domain) => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
+  /** Pastille d'un élément : logo du service s'il est reconnu, sinon pictogramme de la catégorie. */
+  function itemIcon(x, size = '') {
+    const logos = S.cfg.logos !== false;
+    const svc = x.logo ? { domain: x.logo, name: x.label || x.description || '' } : serviceFor(x.description || x.label || '');
+    if (logos && svc && navigator.onLine !== false) {
+      const wrap = h('span', { class: 'ico logo ' + size, 'aria-hidden': 'true' }, h('span', { class: 'lg-ini', text: (svc.name || '?').charAt(0).toUpperCase() }));
+      const img = h('img', { src: logoUrl(svc.domain), alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', decoding: 'async' });
+      img.addEventListener('error', () => { wrap.replaceWith(glyphIcon(x, size)); });
+      // le service renvoie un globe générique de 16 px quand il ne connaît pas le site : on garde alors le pictogramme
+      img.addEventListener('load', () => { if (img.naturalWidth && img.naturalWidth <= 16) wrap.replaceWith(glyphIcon(x, size)); else wrap.classList.add('ok'); });
+      wrap.append(img); return wrap;
+    }
+    return glyphIcon(x, size);
+  }
+  function glyphIcon(x, size = '') {
+    const g = x.toSort ? 'question' : glyphFor(x.category, x.type);
+    return h('span', { class: 'ico ' + size, style: `--hue:${GLYPH_HUE[g]}`, 'aria-hidden': 'true' }, svgEl(GLYPHS[g]));
+  }
+  // ---------------------------------------------------------------- feuilles (panneaux qui montent du bas)
+  function openSheet(build, { label = 'Panneau', wide = false } = {}) {
+    closeSheet(true);
+    const back = h('div', { class: 'sheet-back', id: 'sheet-back' });
+    const panel = h('div', { class: 'sheet' + (wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': label });
+    const close = () => closeSheet();
+    back.addEventListener('click', (e) => { if (e.target === back) close(); });
+    panel.append(h('div', { class: 'sheet-grip', 'aria-hidden': 'true' }), h('button', { class: 'sheet-x', type: 'button', 'aria-label': 'Fermer', onclick: close }, '×'));
+    const body = h('div', { class: 'sheet-body' }); panel.append(body); back.append(panel);
+    document.body.append(back); document.body.classList.add('sheet-open');
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey); back._onKey = onKey;
+    build(body, close);
+    requestAnimationFrame(() => back.classList.add('in'));
+    setTimeout(() => panel.querySelector('input,button.btn')?.focus({ preventScroll: true }), 60);
+  }
+  function closeSheet(now) {
+    const back = $('sheet-back'); if (!back) return;
+    document.removeEventListener('keydown', back._onKey);
+    document.body.classList.remove('sheet-open');
+    if (now || reduceMotion()) { back.remove(); return; }
+    back.classList.remove('in'); back.classList.add('out');
+    setTimeout(() => back.remove(), 260);
+  }
+  /** Fait défiler un montant d'une valeur à l'autre (≈ 0,5 s). */
+  function countTo(el, from, to, fmtFn = money, dur = 520) {
+    if (reduceMotion() || Math.abs(to - from) < 0.005) { el.textContent = fmtFn(to); return; }
+    const t0 = performance.now();
+    const step = (t) => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.textContent = fmtFn(from + (to - from) * e); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+
+  // ---------------------------------------------------------------- abonnements : choisir dans une grille de logos
+  const SUB_PICKS = ['Netflix', 'Spotify', 'Disney+', 'Amazon Prime', 'YouTube Premium', 'Deezer', 'Apple Music', 'iCloud+', 'Canal+', 'Max', 'Paramount+', 'Crunchyroll', 'Twitch', 'Google One', 'Microsoft 365', 'ChatGPT Plus', 'Claude', 'PlayStation Plus', 'Xbox Game Pass', 'Nintendo Online', 'Audible', 'Duolingo', 'Strava', 'Basic-Fit', 'Fitness Park', 'Uber One', 'Deliveroo', 'Le Monde', 'Sosh', 'Free', 'Orange', 'SFR', 'Bouygues Telecom', 'RED by SFR', 'Canva', 'Notion', 'Dropbox', 'Adobe'];
+  function subscriptionCategory() {
+    const f = S.cfg.categories.Factures;
+    return f.find(c => /abonnement/i.test(c)) || (S.cfg.categories.Factures.push('Abonnements'), 'Abonnements');
+  }
+  function openSubscriptionPicker() {
+    const chosen = new Map();
+    openSheet((body, close) => {
+      const draw = () => {
+        const grid = h('div', { class: 'sub-grid' }, ...SUB_PICKS.map(n => SERVICES.find(s => s.name === n)).filter(Boolean).map(s => {
+          const on = chosen.has(s.name);
+          const already = S.cfg.recurring.some(r => r.logo === s.domain || serviceFor(r.label)?.name === s.name);
+          return h('button', { type: 'button', class: 'sub-tile' + (on ? ' on' : '') + (already ? ' has' : ''), 'aria-pressed': String(on), title: already ? 'Déjà dans tes récurrentes' : s.name, onclick: () => { if (on) chosen.delete(s.name); else chosen.set(s.name, { s, amount: '', day: '' }); draw(); } },
+            itemIcon({ logo: s.domain, label: s.name, category: 'Abonnement', type: 'Factures' }, 'lg'), h('span', { class: 'sub-name', text: s.name }), already ? h('span', { class: 'sub-has', text: 'déjà suivi' }) : null);
+        }));
+        const rows = h('div', { class: 'sub-form' }, ...[...chosen.values()].map(c => {
+          const amt = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Montant…', value: c.amount, 'aria-label': `Montant ${c.s.name}` });
+          amt.addEventListener('input', () => { c.amount = amt.value; });
+          const day = h('input', { type: 'number', min: 1, max: 31, inputmode: 'numeric', placeholder: 'Jour…', value: c.day, 'aria-label': `Jour de prélèvement ${c.s.name}` });
+          day.addEventListener('input', () => { c.day = day.value; });
+          return h('div', { class: 'sub-row' }, itemIcon({ logo: c.s.domain, label: c.s.name }, 'sm'), h('span', { class: 'sub-row-n', text: c.s.name }), amt, day);
+        }));
+        const add = h('button', { class: 'btn primary', type: 'button', text: chosen.size ? `Ajouter ${chosen.size} abonnement${chosen.size > 1 ? 's' : ''}` : 'Choisis tes abonnements', disabled: !chosen.size || null, onclick: () => {
+          const tb = bm(todayStr()); const cat = subscriptionCategory(); let n = 0;
+          for (const c of chosen.values()) {
+            const a = r2(parseNum(c.amount)); if (!(a > 0)) continue;
+            const d = Math.min(31, Math.max(1, parseInt(c.day, 10) || 1));
+            S.cfg.recurring.push({ id: uid(), label: c.s.name, logo: c.s.domain, type: 'Factures', category: cat, from: mainAcc(), to: 'Externe', amount: a, day: d, every: 1, start: ymStr(tb.y, tb.m), end: '', pointed: false, active: true, skip: [] });
+            n++;
+          }
+          if (!n) { toast('Indique au moins un montant.'); return; }
+          commit(); close(); toast(`${n} abonnement${n > 1 ? 's' : ''} ajouté${n > 1 ? 's' : ''} à tes récurrentes.`);
+        } });
+        body.replaceChildren(h('h2', { class: 'sheet-t', text: 'Tes abonnements' }),
+          h('p', { class: 'note', text: 'Touche ceux que tu paies, puis indique le montant et le jour de prélèvement. Les logos viennent d’internet.' }),
+          grid, chosen.size ? h('div', null, h('h3', { class: 'sheet-h3', text: 'Montant et jour' }), rows) : null, h('div', { class: 'sheet-foot' }, add));
+      };
+      draw();
+    }, { label: 'Ajouter des abonnements', wide: true });
+  }
+  // ---------------------------------------------------------------- budget pas à pas
+  function openBudgetWizard() {
+    const y = U.year, tb = bm(todayStr());
+    const m = U.period === 'year' ? (tb.y === y ? tb.m : 1) : +U.period;
+    const cur = mIdx(tb.y, tb.m);
+    const bs = [1, 2, 3].map(k => { const { y: yy, m: mm } = ymOf(cur - k); return budget(String(mm), yy); });
+    const avg = (g, c) => Math.round(bs.reduce((a, b) => a + (b[g][c] || 0), 0) / 3);
+    const avgRev = Math.round(bs.reduce((a, b) => a + b.tot.Revenus, 0) / 3);
+    const revCat = S.cfg.categories.Revenus.slice().sort((a, b) => avg('Revenus', b) - avg('Revenus', a))[0];
+    const steps = [];
+    for (const g of ['Factures', 'Dépenses', 'Épargnes']) for (const c of S.cfg.categories[g]) {
+      const a = avg(g, c), p = planned(g, c, String(m), y);
+      if (a > 0 || p > 0) steps.push({ g, c, avg: a, plan: p });
+    }
+    steps.sort((a, b) => (b.plan || b.avg) - (a.plan || a.avg));
+    const st = { i: -1, income: plannedTotal('Revenus', String(m), y) || avgRev, vals: new Map(), dir: 'in' };
+    const used = () => [...st.vals.values()].reduce((a, b) => a + b, 0);
+    openSheet((body, close) => {
+      let lastRest = st.income;
+      const draw = () => {
+        const rest = r2(st.income - used());
+        const R = 46, C = 2 * Math.PI * R, frac = st.income > 0 ? Math.max(0, Math.min(1, used() / st.income)) : 0;
+        const ring = h('div', { class: 'wz-ring' + (rest < 0 ? ' over' : '') });
+        ring.innerHTML = `<svg viewBox="0 0 110 110" aria-hidden="true"><circle cx="55" cy="55" r="${R}" class="wz-track"/><circle cx="55" cy="55" r="${R}" class="wz-fill" style="stroke-dasharray:${C};stroke-dashoffset:${C * (1 - frac)}"/></svg>`;
+        const val = h('span', { class: 'wz-val num' }); const lbl = h('span', { class: 'wz-lbl', text: rest < 0 ? 'au-delà' : 'restant' });
+        ring.append(h('div', { class: 'wz-center' }, val, lbl));
+        countTo(val, lastRest, rest, (v) => fmt0.format(Math.abs(v))); lastRest = rest;
+        const chips = h('div', { class: 'wz-chips' }, ...[...st.vals.entries()].map(([k, v], i, arr) => {
+          const [g, c] = k.split('|');
+          return h('span', { class: 'wz-chip' + (i === arr.length - 1 && st.dir === 'in' ? ' pop' : '') }, glyphIcon({ category: c, type: g }, 'xs'), h('span', { class: 'num', text: fmt0.format(v) }));
+        }));
+        let card;
+        if (st.i === -1) {
+          const inp = h('input', { type: 'text', inputmode: 'decimal', class: 'wz-amt num', value: st.income ? String(Math.round(st.income)) : '', placeholder: '0', 'aria-label': 'Revenus du mois' });
+          const go = () => { const n = r2(parseNum(inp.value)); if (!(n > 0)) { inp.focus(); return; } st.income = n; lastRest = n - used(); st.i = 0; st.dir = 'in'; draw(); };
+          inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+          card = h('div', { class: 'wz-card' }, glyphIcon({ category: 'Salaire', type: 'Revenus' }, 'lg'),
+            h('div', { class: 'wz-t', text: 'Pour commencer, tes revenus du mois' }), h('div', { class: 'hint', text: avgRev ? `Ta moyenne sur 3 mois : ${money(avgRev)}` : 'Salaire, aides, revenus réguliers.' }),
+            h('div', { class: 'wz-field' }, inp, h('span', { class: 'wz-cur', text: '€' })),
+            h('div', { class: 'wz-acts' }, h('button', { class: 'btn primary', type: 'button', text: 'Continuer', onclick: go })));
+          setTimeout(() => inp.focus({ preventScroll: true }), 80);
+        } else if (st.i < steps.length) {
+          const s = steps[st.i], key = s.g + '|' + s.c;
+          const start = st.vals.has(key) ? st.vals.get(key) : (s.plan || '');
+          const inp = h('input', { type: 'text', inputmode: 'decimal', class: 'wz-amt num', value: start === '' ? '' : String(Math.round(start)), placeholder: s.avg ? String(s.avg) : '0', 'aria-label': `Budget ${s.c}` });
+          const next = () => { st.i++; st.dir = 'in'; draw(); };
+          const ok = () => { const raw = inp.value.trim(); const n = raw ? r2(parseNum(raw)) : s.avg; if (!(n >= 0)) { inp.focus(); return; } st.vals.set(key, n); next(); };
+          inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+          card = h('div', { class: 'wz-card' }, glyphIcon({ category: s.c, type: s.g }, 'lg'),
+            h('div', { class: 'wz-t', text: s.c }), h('div', { class: 'hint', text: `${s.g === 'Épargnes' ? 'Mis de côté' : 'Budget'} par mois${s.avg ? `, ta moyenne : ${money(s.avg)}` : ''}` }),
+            h('div', { class: 'wz-field' }, inp, h('span', { class: 'wz-cur', text: '€' })),
+            h('div', { class: 'wz-acts' }, h('button', { class: 'btn ghost', type: 'button', text: 'Plus tard', onclick: next }), h('button', { class: 'btn primary', type: 'button', text: 'Valider', onclick: ok })),
+            h('div', { class: 'wz-step hint', text: `${st.i + 1} sur ${steps.length}` }));
+          setTimeout(() => inp.focus({ preventScroll: true }), 80);
+        } else {
+          const months = 12 - m + 1;
+          card = h('div', { class: 'wz-card' }, h('div', { class: 'wz-t', text: rest >= 0 ? `Il te reste ${money(rest)} de marge chaque mois` : `Tu dépasses de ${money(-rest)}` }),
+            h('div', { class: 'hint', text: `${st.vals.size} poste${st.vals.size > 1 ? 's' : ''} budgété${st.vals.size > 1 ? 's' : ''}. On l’enregistre pour ${MONTHS[m - 1].toLowerCase()}${months > 1 ? ` et les ${months - 1} mois suivants` : ''} de ${y}.` }),
+            h('div', { class: 'wz-acts' }, h('button', { class: 'btn ghost', type: 'button', text: 'Revoir', onclick: () => { st.i = 0; draw(); } }),
+              h('button', { class: 'btn primary', type: 'button', text: 'Enregistrer mon budget', onclick: () => {
+                S.cfg.plan[y] = S.cfg.plan[y] || {};
+                const put = (g, c, v) => { S.cfg.plan[y][g] = S.cfg.plan[y][g] || {}; const arr = Array.from({ length: 12 }, (_, k) => +(S.cfg.plan[y][g][c] || [])[k] || 0); for (let k = m - 1; k < 12; k++) arr[k] = v; S.cfg.plan[y][g][c] = arr; };
+                for (const [k, v] of st.vals) { const [g, c] = k.split('|'); put(g, c, v); }
+                const otherRev = S.cfg.categories.Revenus.filter(c => c !== revCat).reduce((a, c) => a + planned('Revenus', c, String(m), y), 0);
+                if (revCat) put('Revenus', revCat, Math.max(0, r2(st.income - otherRev)));
+                commit(); close(); toast('Budget enregistré. Tu peux l’ajuster case par case dans le tableau.');
+              } })));
+        }
+        card.classList.add(st.dir === 'in' ? 'wz-in' : 'wz-back');
+        body.replaceChildren(h('div', { class: 'wz' }, h('div', { class: 'wz-head' }, ring, chips), card));
+      };
+      draw();
+    }, { label: 'Construire mon budget' });
+  }
   /** Compte d'où partent le plus souvent les dépenses (90 derniers jours). */
   function usualSpendAccount() {
     const lim = isoOf(new Date(Date.now() - 90 * 864e5)), n = {};
@@ -1362,7 +1662,7 @@
     const empty = !rev && !fac && !dep && !ep;
     const box = $('plan-head');
     const fromM = tb.y === y ? tb.m : 1;
-    const prefill = h('button', { class: 'btn primary', type: 'button', text: 'Préremplir avec mes habitudes', title: 'Moyenne de tes 3 derniers mois, uniquement dans les cases vides', onclick: () => {
+    const prefill = h('button', { class: 'btn', type: 'button', text: 'Préremplir avec mes habitudes', title: 'Moyenne de tes 3 derniers mois, uniquement dans les cases vides', onclick: () => {
       const n = prefillPlan(y, fromM); commit(); toast(n ? `${n} case${n > 1 ? 's' : ''} préremplie${n > 1 ? 's' : ''} avec la moyenne de tes 3 derniers mois. Ajuste ce qui doit l’être.` : 'Rien à préremplir : les cases sont déjà remplies ou il manque de l’historique.');
     } });
     const prevPlan = S.cfg.plan[y - 1];
@@ -1378,7 +1678,7 @@
           h('div', { class: 'alloc plan-bar' }, seg(fac, 'var(--muted)', 'Factures'), seg(dep, 'var(--ochre)', 'Dépenses'), seg(ep, 'var(--plum)', 'Épargne'), marge > 0 ? seg(marge, 'var(--accent)', 'Marge') : null),
           h('div', { class: 'plan-legend' },
             ...[['Revenus', rev, ''], ['Factures', fac, 'var(--muted)'], ['Dépenses', dep, 'var(--ochre)'], ['Épargne', ep, 'var(--plum)'], ['Marge', Math.max(0, marge), 'var(--accent)']].map(([l, v, c]) => h('span', null, c ? h('i', { class: 'sw', style: `background:${c}` }) : null, l, h('b', { class: 'num', text: money(v) }))))),
-      h('div', { class: 'btnrow' }, prefill, copy)));
+      h('div', { class: 'btnrow' }, h('button', { class: 'btn primary', type: 'button', text: empty ? 'Construire mon budget pas à pas' : 'Refaire mon budget pas à pas', onclick: openBudgetWizard }), prefill, copy)));
   }
   function renderPlan() {
     const y = U.year;
@@ -1436,7 +1736,7 @@
       if (rest <= 0) eta = 'Objectif atteint';
       else if (pm > 1) { const n = Math.ceil(rest / pm); const { y, m } = ymOf(cur + n); eta = `À ce rythme (${money(pm)} par mois) : ${MONTHS[m - 1].toLowerCase()} ${y}`; }
       else eta = 'Pas de versement ces 3 derniers mois';
-      return h('div', { class: 'goal' + (rest <= 0 ? ' done' : '') },
+      return h('div', { class: 'goal' + (rest <= 0 ? ' done' : '') + (g.photo ? ' photo' : ''), style: g.photo ? `--img:url(${g.photo})` : null },
         h('div', { class: 'goal-top' }, h('span', { class: 'goal-name', text: g.category || 'Objectif' }), h('span', { class: 'goal-pct num', text: pct.format(prog) })),
         h('div', { class: 'goal-amt' }, moneyEl(tot), h('span', { class: 'goal-of', text: ` sur ${money(g.target)}` })),
         h('div', { class: 'goal-bar' }, h('i', { style: `width:${prog * 100}%` })),
@@ -1833,6 +2133,15 @@
     return wrap;
   }
 
+  /** Réduit une photo (bord max en px) en JPEG pour la garder sur l'appareil sans saturer le stockage. */
+  function shrinkImage(file, max) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file), img = new Image();
+      img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', 0.72)); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(); };
+      img.src = url;
+    });
+  }
   function goalsEditor(cfg, onChange) {
     const tb = h('tbody');
     cfg.goals.forEach((g, i) => {
@@ -1841,8 +2150,11 @@
       const acc = h('select', { id: `goal-acc-${g.id}` }, opt('', '— compte —'), ...cfg.accounts.map(a => opt(a.name, a.name, a.name === g.account)));
       acc.addEventListener('change', () => { g.account = acc.value; onChange(); });
       const num = (k, label) => { const el = h('input', { type: 'text', inputmode: 'decimal', class: 'n', id: `goal-${k}-${g.id}`, value: num2.format(g[k]), 'aria-label': label }); el.addEventListener('change', () => { const n = parseNum(el.value); if (Number.isFinite(n) && n >= 0) { g[k] = r2(n); onChange(); } else el.value = num2.format(g[k]); }); return el; };
+      const file = h('input', { type: 'file', accept: 'image/*', hidden: true });
+      file.addEventListener('change', () => { const f = file.files[0]; if (!f) return; shrinkImage(f, 900).then(url => { g.photo = url; onChange(); toast('Photo ajoutée à l’objectif.'); }).catch(() => toast('Impossible de lire cette image.')); });
+      const photo = h('button', { class: 'btn small' + (g.photo ? '' : ' ghost'), type: 'button', text: g.photo ? 'Changer la photo' : '+ Photo', onclick: () => file.click() });
       tb.append(h('tr', null, h('td', null, cat), h('td', null, acc), h('td', { class: 'r' }, num('start', 'Montant de départ')), h('td', { class: 'r' }, num('target', 'Objectif')),
-        h('td', null, h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', onclick: () => { cfg.goals.splice(i, 1); onChange(); } }))));
+        h('td', null, h('div', { class: 'acts' }, file, photo, g.photo ? h('button', { class: 'btn small ghost', type: 'button', text: 'Retirer', onclick: () => { delete g.photo; onChange(); } }) : null, h('button', { class: 'btn small danger', type: 'button', text: 'Supprimer', onclick: () => { cfg.goals.splice(i, 1); onChange(); } })))));
     });
     return h('div', null,
       cfg.goals.length ? h('div', { class: 'scroll' }, h('table', { class: 'edit-table' }, h('thead', null, h('tr', null, h('th', { text: 'Catégorie d’épargne' }), h('th', { text: 'Compte' }), h('th', { class: 'r', text: 'Déjà épargné' }), h('th', { class: 'r', text: 'Objectif' }), h('th'))), tb)) : h('p', { class: 'mut', text: 'Aucun objectif pour l’instant.' }),
@@ -1877,7 +2189,10 @@
     const custom = h('input', { type: 'color', id: 'look-color', value: cfg.accent, 'aria-label': 'Couleur personnalisée', style: 'width:40px;height:32px;padding:0;border:1px solid var(--line);border-radius:8px;background:none' });
     custom.addEventListener('change', () => { cfg.accent = custom.value; cfg.accentChosen = true; onChange(); });
     sw.append(custom);
-    return h('div', { class: 'fields' }, h('div', { class: 'field' }, 'Thème', seg), h('div', { class: 'field' }, 'Couleur principale', sw));
+    const lg = h('input', { type: 'checkbox', class: 'switch', role: 'switch', checked: cfg.logos !== false });
+    lg.addEventListener('change', () => { cfg.logos = lg.checked; onChange(); });
+    return h('div', { class: 'fields' }, h('div', { class: 'field' }, 'Thème', seg), h('div', { class: 'field' }, 'Couleur principale', sw),
+      h('label', { class: 'switch-row', style: 'grid-column:1/-1;justify-content:space-between' }, h('span', null, h('span', { style: 'display:block', text: 'Logos des services' }), h('span', { class: 'hint', text: 'Netflix, Sosh, MAIF… sont reconnus dans tes libellés et leur logo est chargé depuis internet.' })), lg));
   }
 
   // ---------------------------------------------------------------- réglages
