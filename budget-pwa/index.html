@@ -11,10 +11,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Focale">
-<link rel="manifest" href="manifest.webmanifest?v=2.0.0">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=2.0.0">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2.0.0">
-<link rel="stylesheet" href="styles.css?v=2.0.0">
+<link rel="manifest" href="manifest.webmanifest?v=2.1.0">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=2.1.0">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2.1.0">
+<link rel="stylesheet" href="styles.css?v=2.1.0">
 </head>
 <body>
 <a class="skip" href="#main">Aller au contenu</a>
@@ -23,8 +23,12 @@
     <div class="toprow">
       <div class="brand"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11.5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="16" cy="16" r="3.4" fill="var(--accent)"/></svg><h1 id="appName">Focale</h1><span id="status" class="status"></span></div>
       <div class="controls">
-        <select id="period" aria-label="Période"></select>
-        <select id="year" aria-label="Année"></select>
+        <div class="period-step">
+          <button class="step-btn" id="prevP" type="button" aria-label="Période précédente">‹</button>
+          <select id="period" aria-label="Mois"></select>
+          <select id="year" aria-label="Année"></select>
+          <button class="step-btn" id="nextP" type="button" aria-label="Période suivante">›</button>
+        </div>
         <button class="btn primary" id="quickAdd" type="button">+ Transaction</button>
       </div>
     </div>
@@ -57,6 +61,7 @@
         <div class="kpis kpis-3" id="kpis"></div>
         <div class="more-link"><button class="btn" type="button" id="toAnalyse">Voir l’analyse du mois</button></div>
       </div>
+      <div id="ap-bilan" class="subview" hidden></div>
       <div id="ap-analyse" class="subview" hidden>
         <div class="kpis" id="kpis-full"></div>
         <div class="alerts" id="alerts-over"></div>
@@ -79,7 +84,7 @@
         <div class="card span">
           <h2>Mois par mois</h2>
           <p class="note">Revenus, sorties (factures + dépenses) et épargne de chaque mois. Touche un mois pour l'afficher.</p>
-          <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>Revenus</span><span><i class="sw" style="background:var(--ochre)"></i>Factures + dépenses</span><span><i class="sw" style="background:var(--plum)"></i>Épargne</span></div>
+          <div class="legend"><span><i class="sw" style="background:var(--c-in)"></i>Revenus</span><span><i class="sw" style="background:var(--c-out)"></i>Factures + dépenses</span><span><i class="sw" style="background:var(--c-save)"></i>Épargne</span></div>
           <div class="chart" id="ch-months"></div>
         </div>
         <div class="card">
@@ -178,7 +183,7 @@
 <div id="toast" class="toast" role="status" hidden></div>
 <input type="file" id="fileJson" accept="application/json,.json" hidden>
 <input type="file" id="fileCsv" accept=".csv,text/csv,text/plain" hidden>
-<script src="app.js?v=2.0.0"></script>
+<script src="app.js?v=2.1.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

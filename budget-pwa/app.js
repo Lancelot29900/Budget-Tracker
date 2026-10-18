@@ -2,10 +2,15 @@
    Toutes les données restent dans le navigateur (localStorage), avec export/import de sauvegarde. */
 (() => {
   'use strict';
+  // les nœuds vides (null, false) sont ignorés au lieu d'être écrits « null » à l'écran
+  for (const fn of ['replaceChildren', 'append']) {
+    const orig = Element.prototype[fn];
+    Element.prototype[fn] = function (...kids) { return orig.apply(this, kids.filter(k => k != null && k !== false)); };
+  }
 
   // ---------------------------------------------------------------- constantes
   const KEY = 'budget-app-v1';
-  const APP_VERSION = '2.0.0';
+  const APP_VERSION = '2.1.0';
   const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const MSHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
   const TYPES = ['Dépenses','Factures','Revenus','Épargnes',"Reprise d'épargne",'Transfert de fonds','Remboursement'];
@@ -266,7 +271,10 @@
     const set = new Set([S.cfg.year, bm(todayStr()).y]);
     for (const t of S.tx) set.add(bm(t.date).y);
     for (const y of Object.keys(S.cfg.plan)) set.add(+y);
-    return [...set].filter(y => y >= 1990 && y <= 2100).sort((a, b) => a - b);
+    set.add(U.year);
+    const ok = [...set].filter(y => y >= 1990 && y <= 2200);
+    const lo = Math.min(...ok), hi = Math.max(...ok) + 1;
+    return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   }
   function lastActiveMonth(y) {
     const tb = bm(todayStr());
@@ -293,6 +301,7 @@
     const list = cfg.categories[group];
     const i = list.indexOf(oldName); if (i < 0) return;
     list[i] = newName;
+    if (cfg.catIcons && cfg.catIcons[oldName]) { cfg.catIcons[newName] = cfg.catIcons[oldName]; delete cfg.catIcons[oldName]; }
     if (!withData) return;
     for (const t of S.tx) if (t.category === oldName && groupsOfType(t.type).includes(group)) t.category = newName;
     if (GROUPS.includes(group)) for (const y of Object.keys(cfg.plan)) {
@@ -331,8 +340,8 @@
     // sélecteurs de période
     const ys = years(); if (!ys.includes(U.year)) U.year = ys[ys.length - 1];
     const ysel = $('year'); ysel.replaceChildren(...ys.map(y => opt(String(y), String(y), y === U.year)));
-    ysel.hidden = ys.length < 2;
-    const ps = $('period'); ps.replaceChildren(...MONTHS.map((m, i) => opt(String(i + 1), ys.length < 2 ? `${m} ${U.year}` : m, String(i + 1) === U.period)), opt('year', ys.length < 2 ? `Année ${U.year}` : 'Année entière', U.period === 'year'));
+    ysel.hidden = false;
+    const ps = $('period'); ps.replaceChildren(...MONTHS.map((m, i) => opt(String(i + 1), m, String(i + 1) === U.period)), opt('year', 'Année entière', U.period === 'year'));
     document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === U.tab)));
     for (const t of TABS) $('p-' + t).hidden = t !== U.tab;
     if (U.tab === 'apercu') renderApercu();
@@ -347,6 +356,15 @@
     if (U.tab === 'previsionnel') renderPlan();
     if (U.tab === 'epargne') renderEpargne();
     if (U.tab === 'reglages') renderSettings();
+  }
+  /** Mois précédent / suivant, sans limite d'année. */
+  function stepPeriod(d) {
+    transition(() => {
+      if (U.period === 'year') U.year += d;
+      else { let m = +U.period + d, y = U.year; while (m < 1) { m += 12; y--; } while (m > 12) { m -= 12; y++; } U.period = String(m); U.year = y; }
+      if (U.tab === 'transactions' && !U.editing) resetForm();
+      U.calDay = null; render();
+    }, d > 0 ? 'fwd' : 'back');
   }
   function showTab(tab) {
     if (!TABS.includes(tab)) tab = 'apercu';
@@ -408,8 +426,9 @@
   }
   // ---------------------------------------------------------------- calendrier du mois, avec les échéances
   const compact = (v) => { const a = Math.abs(v); return a >= 1000 ? `${num2.format(Math.round(a / 100) / 10).replace(/,0$/, '')} k` : String(Math.round(a)); };
+  function calYm() { const tb = bm(todayStr()); if (U.period === 'year') return U.year === tb.y ? tb : { y: U.year, m: 1 }; return { y: U.year, m: +U.period }; }
   function monthItems() {
-    const today = todayStr(), tb = bm(today);
+    const today = todayStr(), tb = calYm();
     const curAcc = new Set((S.cfg.accounts.some(a => a.current) ? S.cfg.accounts.filter(a => a.current) : S.cfg.accounts.filter(a => !a.savings)).map(a => a.name));
     const sign = (x) => curAcc.has(x.to) && !curAcc.has(x.from) ? 1 : curAcc.has(x.from) && !curAcc.has(x.to) ? -1 : 0;
     const items = [];
@@ -424,14 +443,15 @@
       items.push({ date: t.date, label: t.description || t.category, amount: s * t.amount, x: t, state: 'pending' });
     }
     const pay = nextPayday();
-    if (pay && !items.some(i => i.date === pay.date && i.amount > 0)) items.push({ date: pay.date, label: pay.label, amount: 0, x: { category: 'Salaire', type: 'Revenus', description: pay.label }, state: 'guess' });
+    if (pay && pay.date >= isoOf(monthRange(tb.y, tb.m)[0]) && pay.date <= isoOf(monthRange(tb.y, tb.m)[1]) && !items.some(i => i.date === pay.date && i.amount > 0)) items.push({ date: pay.date, label: pay.label, amount: 0, x: { category: 'Salaire', type: 'Revenus', description: pay.label }, state: 'guess' });
     return { items, pay };
   }
   function renderMonthCal() {
     const box = $('cal'); if (!box) return;
-    const today = todayStr(), tb = bm(today);
+    const today = todayStr(), tb = calYm(), now = bm(today), isNow = tb.y === now.y && tb.m === now.m;
     const [st, en] = monthRange(tb.y, tb.m);
-    const { items, pay } = monthItems();
+    const { items, pay: pay0 } = monthItems();
+    const pay = isNow ? pay0 : null;
     const byDay = new Map();
     for (const it of items) { if (!byDay.has(it.date)) byDay.set(it.date, []); byDay.get(it.date).push(it); }
     const grid = h('div', { class: 'cal-grid' });
@@ -447,7 +467,7 @@
       if (its.length) {
         const main = its[0];
         cell.append(h('span', { class: 'cal-ic' }, itemIcon(main.x, 'xs'), its.length > 1 ? h('span', { class: 'cal-more', text: `+${its.length - 1}` }) : null),
-          net ? h('span', { class: 'cal-amt ' + (net > 0 ? 'pos' : ''), text: (net > 0 ? '+' : '−') + compact(net) }) : h('span', { class: 'cal-amt mut', text: 'paie' }));
+          net ? h('span', { class: 'cal-amt ' + (net > 0 ? 'pos' : 'neg'), text: (net > 0 ? '+' : '−') + compact(net) }) : h('span', { class: 'cal-amt mut', text: 'paie' }));
       }
       grid.append(cell);
     }
@@ -462,16 +482,20 @@
     }
     const left = Math.max(0, Math.round((en - new Date(today + 'T00:00:00')) / 864e5));
     let line;
-    if (pay) {
+    if (!isNow) {
+      const inn = items.filter(i => i.amount > 0).reduce((s, i) => s + i.amount, 0), out = items.filter(i => i.amount < 0).reduce((s, i) => s + i.amount, 0);
+      line = items.length ? [h('b', { class: 'c-in-t', text: `+${money(inn)}` }), ' et ', h('b', { class: 'c-out-t', text: `−${money(-out)}` }), tb.y * 12 + tb.m > now.y * 12 + now.m ? ' prévus sur tes comptes courants ce mois-là.' : ' passés par tes comptes courants ce mois-là.'] : ['Rien de prévu ce mois-là pour l’instant.'];
+    } else if (pay) {
       const dn = Math.max(1, Math.round((new Date(pay.date + 'T00:00:00') - new Date(today + 'T00:00:00')) / 864e5));
       const when = new Date(pay.date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
       line = [h('b', { text: dn === 1 ? 'Demain' : `Dans ${dn} jours` }), ` : ${normTxt(pay.label) === 'salaire' ? 'ton salaire' : pay.label}, le ${when}.`];
     } else line = [h('b', { text: left ? `${left} jour${left > 1 ? 's' : ''}` : 'Dernier jour' }), left ? ' avant le mois suivant.' : ' du mois.'];
     const upcoming = items.filter(i => i.date >= today && i.amount < 0 && i.state !== 'done' && i.state !== 'skip');
-    const title = new Date(st.getTime() + 10 * 864e5).toLocaleDateString('fr-FR', { month: 'long' });
+    const title = new Date(st.getTime() + 10 * 864e5).toLocaleDateString('fr-FR', tb.y === now.y ? { month: 'long' } : { month: 'long', year: 'numeric' });
+    const nav = (d) => h('button', { type: 'button', class: 'cal-nav', 'aria-label': d < 0 ? 'Mois précédent' : 'Mois suivant', onclick: () => { if (U.period === 'year') { U.period = String(tb.m); U.year = tb.y; } stepPeriod(d); } }, d < 0 ? '‹' : '›');
     box.replaceChildren(
-      h('div', { class: 'cal-top' }, h('span', { class: 'cal-title', text: title.charAt(0).toUpperCase() + title.slice(1) }),
-        upcoming.length ? h('span', { class: 'cal-sum hint', text: `${sgn(r2(upcoming.reduce((s, i) => s + i.amount, 0)))} à venir` }) : null),
+      h('div', { class: 'cal-top' }, h('span', { class: 'cal-head' }, nav(-1), h('span', { class: 'cal-title', text: title.charAt(0).toUpperCase() + title.slice(1) }), nav(1), !isNow ? h('button', { type: 'button', class: 'linkbtn cal-today', text: 'Aujourd’hui', onclick: () => transition(() => { const n = bm(todayStr()); U.period = String(n.m); U.year = n.y; U.calDay = null; render(); }) }) : null),
+        isNow && upcoming.length ? h('span', { class: 'cal-sum hint', text: `${sgn(r2(upcoming.reduce((s, i) => s + i.amount, 0)))} à venir` }) : null),
       grid, detail || '', h('p', { class: 'cal-line' }, ...line),
       !S.cfg.recurring.length ? h('p', { class: 'hint cal-tip' }, 'Ajoute tes récurrentes pour voir tes échéances ici. ', h('button', { class: 'linkbtn', type: 'button', text: 'Les ajouter', onclick: () => { U.sub.transactions = 'recur'; showTab('transactions'); } })) : '');
   }
@@ -579,9 +603,10 @@
     const reste = r2(t.Revenus - t.Factures - t['Dépenses'] - netSave);
     const rate = t.Revenus ? netSave / t.Revenus : 0;
     const overD = r2(t['Dépenses'] - pD);
-    subnav('sub-apercu', 'apercu', [['essentiel', 'L’essentiel'], ['analyse', 'Analyse du mois']]);
-    const ana = U.sub.apercu === 'analyse';
-    $('ap-essentiel').hidden = ana; $('ap-analyse').hidden = !ana;
+    subnav('sub-apercu', 'apercu', [['essentiel', 'L’essentiel'], ['analyse', 'Analyse'], ['bilan', 'Bilan annuel']]);
+    const ana = U.sub.apercu === 'analyse', bil = U.sub.apercu === 'bilan';
+    $('ap-essentiel').hidden = ana || bil; $('ap-analyse').hidden = !ana; $('ap-bilan').hidden = !bil;
+    if (bil) { renderBilan(); return; }
     const lede = $('lede'); lede.replaceChildren();
     lede.className = 'hero';
     renderMonthCal();
@@ -615,14 +640,14 @@
     const kpi = (lbl, val, sub, dl, cls) => h('div', { class: 'kpi' }, h('span', { class: 'lbl', text: lbl }), h('span', { class: 'val ' + (cls || ''), text: val }), dl, h('span', { class: 'sub', text: sub }));
     const sorties = r2(t.Factures + t['Dépenses']), pSorties = r2(pF + pD);
     $('kpis').replaceChildren(
-      kpi('Entré ce mois', money(t.Revenus), pRev ? `sur ${money(pRev)} prévus` : 'revenus de la période'),
-      kpi('Sorti', money(sorties), pSorties ? `sur ${money(pSorties)} prévus` : 'factures et dépenses', null, pSorties && sorties > pSorties + 0.004 ? 'neg' : ''),
-      kpi('Mis de côté', money(netSave), pE ? `sur ${money(pE)} prévus` : 'épargne nette'));
+      kpi('Entré ce mois', money(t.Revenus), pRev ? `sur ${money(pRev)} prévus` : 'revenus de la période', null, 'c-in-t'),
+      kpi('Sorti', money(sorties), pSorties ? `sur ${money(pSorties)} prévus` + (sorties > pSorties + 0.004 ? `, ${money(r2(sorties - pSorties))} de plus` : '') : 'factures et dépenses', null, 'c-out-t'),
+      kpi('Mis de côté', money(netSave), pE ? `sur ${money(pE)} prévus` : 'épargne nette', null, 'c-save-t'));
     $('kpis-full').replaceChildren(
-      kpi('Revenus', money(t.Revenus), `prévu ${money(pRev)}`, delta(t.Revenus, pb.Revenus, true)),
-      kpi('Factures', money(t.Factures), `prévu ${money(pF)}`, delta(t.Factures, pb.Factures, false)),
-      kpi('Dépenses', money(t['Dépenses']), `prévu ${money(pD)}`, delta(t['Dépenses'], pb['Dépenses'], false), overD > 0.004 && pD > 0 ? 'neg' : ''),
-      kpi('Épargne nette', money(netSave), `prévu ${money(pE)}, dont ${money(t.reprises)} repris`, delta(netSave, r2(pb['Épargnes'] - pb.reprises), true)),
+      kpi('Revenus', money(t.Revenus), `prévu ${money(pRev)}`, delta(t.Revenus, pb.Revenus, true), 'c-in-t'),
+      kpi('Factures', money(t.Factures), `prévu ${money(pF)}`, delta(t.Factures, pb.Factures, false), 'c-out-t'),
+      kpi('Dépenses', money(t['Dépenses']), `prévu ${money(pD)}`, delta(t['Dépenses'], pb['Dépenses'], false), 'c-out-t'),
+      kpi('Épargne nette', money(netSave), `prévu ${money(pE)}, dont ${money(t.reprises)} repris`, delta(netSave, r2(pb['Épargnes'] - pb.reprises), true), 'c-save-t'),
       kpi('Solde du mois', money(reste), 'revenus − factures − dépenses − épargne', delta(reste, pReste, true), reste < 0 ? 'neg' : '')
     );
     renderPace(t['Dépenses'], pD);
@@ -660,7 +685,7 @@
       for (const x of rows) {
         const d = r2(good(x.p, x.r)), w = Math.min(100, x.p ? x.r / x.p * 100 : 100);
         const ov = (g === 'Factures' || g === 'Dépenses') && x.r > x.p + 0.005;
-        const col = ov ? 'var(--bad)' : g === 'Dépenses' ? 'var(--ochre)' : g === 'Épargnes' ? 'var(--plum)' : g === 'Factures' ? 'var(--muted)' : 'var(--accent)';
+        const col = ov ? 'var(--bad)' : g === 'Dépenses' || g === 'Factures' ? 'var(--c-out)' : g === 'Épargnes' ? 'var(--c-save)' : 'var(--c-in)';
         tb.append(h('tr', null, h('td', { text: x.c }), h('td', { class: 'r num mut', text: money(x.p) }), h('td', { class: 'r num', text: money(x.r) }),
           h('td', { style: 'width:22%' }, h('div', { class: 'bar' }, h('i', { style: `width:${Math.max(0, w)}%;background:${col}` }))),
           h('td', { class: 'r num ' + (Math.abs(d) < 0.005 ? 'mut' : d < 0 ? 'neg' : 'pos'), text: sgn(d) })));
@@ -705,9 +730,9 @@
   function renderAlloc(t, netSave) {
     const box = $('alloc'); const R = t.Revenus;
     if (R <= 0) { box.replaceChildren(h('p', { class: 'mut', text: 'Aucun revenu sur cette période.' })); return; }
-    const parts = [['Factures', t.Factures, 'var(--muted)'], ['Dépenses', t['Dépenses'], 'var(--ochre)'], ['Épargne nette', Math.max(0, netSave), 'var(--plum)']];
+    const parts = [['Factures', t.Factures, 'color-mix(in srgb,var(--c-out) 55%,var(--muted))'], ['Dépenses', t['Dépenses'], 'var(--c-out)'], ['Épargne nette', Math.max(0, netSave), 'var(--c-save)']];
     const used = parts.reduce((a, p) => a + p[1], 0), rest = r2(R - used);
-    if (rest > 0) parts.push(['Reste', rest, 'var(--accent)']);
+    if (rest > 0) parts.push(['Reste', rest, 'var(--c-in)']);
     const base = Math.max(R, used);
     const bar = h('div', { class: 'alloc', role: 'img', 'aria-label': 'Répartition des revenus' }, ...parts.filter(p => p[1] > 0).map(p => h('i', { style: `width:${p[1] / base * 100}%;background:${p[2]}`, title: `${p[0]} ${money(p[1])}` })));
     const list = h('div', { class: 'alloc-list' }, ...parts.map(p => h('div', null, h('i', { class: 'sw', style: `background:${p[2]}` }), h('span', { text: p[0] }), h('span', { class: 'num', text: money(r2(p[1])) }), h('span', { class: 'p', text: pct.format(p[1] / R) }))));
@@ -810,7 +835,7 @@
     data.forEach(d => {
       const x0 = m.l + d.i * bw + (bw - bwid * 3 - 4) / 2;
       if (d.i === sel) svg.append(s('rect', { x: m.l + d.i * bw + 1, y: m.t, width: bw - 2, height: ih, fill: 'var(--sunk)', rx: 6 }));
-      [['rev', 'var(--accent)'], ['out', 'var(--ochre)'], ['ep', 'var(--plum)']].forEach(([k, c], j) => {
+      [['rev', 'var(--c-in)'], ['out', 'var(--c-out)'], ['ep', 'var(--c-save)']].forEach(([k, c], j) => {
         const v = d[k]; if (v <= 0) return;
         svg.append(s('rect', { x: x0 + j * (bwid + 2), y: y(v), width: bwid, height: Math.max(1, y(0) - y(v)), fill: c, rx: Math.min(3, bwid / 2) }));
       });
@@ -820,9 +845,9 @@
       const hit = s('rect', { x: m.l + d.i * bw, y: m.t, width: bw, height: ih + m.b, fill: 'transparent', style: 'cursor:pointer' });
       const show = () => {
         tip.replaceChildren(h('div', { class: 'h', text: `${MONTHS[d.i]} ${U.year}` }),
-          h('div', null, h('i', { class: 'sw', style: 'background:var(--accent)' }), `Revenus ${money(d.rev)}`),
-          h('div', null, h('i', { class: 'sw', style: 'background:var(--ochre)' }), `Factures + dépenses ${money(d.out)}`),
-          h('div', null, h('i', { class: 'sw', style: 'background:var(--plum)' }), `Épargne ${money(d.ep)}`),
+          h('div', null, h('i', { class: 'sw', style: 'background:var(--c-in)' }), `Revenus ${money(d.rev)}`),
+          h('div', null, h('i', { class: 'sw', style: 'background:var(--c-out)' }), `Factures + dépenses ${money(d.out)}`),
+          h('div', null, h('i', { class: 'sw', style: 'background:var(--c-save)' }), `Épargne ${money(d.ep)}`),
           h('div', { class: 'h', text: `Reste ${money(r2(d.rev - d.out))}` }));
         placeTip(box, tip, m.l + d.i * bw + bw / 2, y(Math.max(d.rev, d.out, d.ep)));
       };
@@ -1279,6 +1304,8 @@
     [/a classer/, 'question']
   ];
   function glyphFor(category, type) {
+    const custom = (typeof S !== 'undefined' && S && S.cfg.catIcons) ? S.cfg.catIcons[category] : null;
+    if (custom && GLYPHS[custom]) return custom;
     const n = normTxt(category);
     for (const [re, g] of GLYPH_RULES) if (re.test(n)) return g;
     if (type === 'Revenus') return 'work';
@@ -1372,6 +1399,77 @@
     const f = S.cfg.categories.Factures;
     return f.find(c => /abonnement/i.test(c)) || (S.cfg.categories.Factures.push('Abonnements'), 'Abonnements');
   }
+  const GROUP_COLOR = { Revenus: 'var(--c-in)', Factures: 'var(--c-out)', 'Dépenses': 'var(--c-out)', 'Épargnes': 'var(--c-save)', Transferts: 'var(--muted)' };
+  const GROUP_TYPE = { Revenus: 'Revenus', Factures: 'Factures', 'Dépenses': 'Dépenses', 'Épargnes': 'Épargnes', Transferts: 'Transfert de fonds' };
+  /** Choix du pictogramme d'une catégorie. */
+  function openIconPicker(cfg, cat, onDone) {
+    openSheet((body, close) => {
+      const cur = (cfg.catIcons || {})[cat] || glyphFor(cat);
+      body.replaceChildren(...[h('h2', { class: 'sheet-t', text: `Icône de « ${cat} »` }),
+        h('p', { class: 'note', text: 'Elle s’affiche dans tes transactions, tes récurrentes et le calendrier, quand aucun logo de service n’est reconnu.' }),
+        h('div', { class: 'ic-grid' }, ...Object.keys(GLYPHS).filter(k => k !== 'question').map(k => h('button', { type: 'button', class: 'ic-pick' + (k === cur ? ' on' : ''), 'aria-pressed': String(k === cur), 'aria-label': k, onclick: () => {
+          cfg.catIcons = cfg.catIcons || {}; cfg.catIcons[cat] = k; close(); onDone();
+        } }, h('span', { class: 'ico lg', style: `--hue:${GLYPH_HUE[k]}` }, svgEl(GLYPHS[k]))))),
+        (cfg.catIcons || {})[cat] ? h('div', { class: 'sheet-foot' }, h('button', { class: 'btn', type: 'button', text: 'Revenir à l’icône automatique', onclick: () => { delete cfg.catIcons[cat]; close(); onDone(); } })) : null].filter(Boolean));
+    }, { label: 'Choisir une icône' });
+  }
+  // ---------------------------------------------------------------- bilan d'une année, comparé à une autre
+  function renderBilan() {
+    const box = $('ap-bilan'); if (!box) return;
+    const ys = years().filter(y => S.tx.some(t => bm(t.date).y === y) || S.cfg.plan[y]);
+    if (!U.bilanA || !ys.includes(U.bilanA)) U.bilanA = ys.includes(U.year) ? U.year : ys[ys.length - 1];
+    if (U.bilanB === undefined) U.bilanB = ys.includes(U.bilanA - 1) ? U.bilanA - 1 : null;
+    const A = U.bilanA, B = U.bilanB;
+    const tot = (y) => { const b = budget('year', y); const t = b.tot; const save = r2(t['Épargnes'] - t.reprises); const out = r2(t.Factures + t['Dépenses']);
+      const months = new Set(S.tx.filter(x => bm(x.date).y === y).map(x => bm(x.date).m)).size || 1;
+      return { b, rev: t.Revenus, out, fac: t.Factures, dep: t['Dépenses'], save, solde: r2(t.Revenus - out - save), rate: t.Revenus ? save / t.Revenus : 0, months, avgOut: r2(out / months) }; };
+    const a = tot(A), bb = B ? tot(B) : null;
+    const selA = h('select', { 'aria-label': 'Année du bilan' }, ...ys.map(y => opt(String(y), String(y), y === A)));
+    selA.addEventListener('change', () => { U.bilanA = +selA.value; renderBilan(); });
+    const selB = h('select', { 'aria-label': 'Comparer avec' }, opt('', 'Pas de comparaison', !B), ...ys.filter(y => y !== A).map(y => opt(String(y), String(y), y === B)));
+    selB.addEventListener('change', () => { U.bilanB = selB.value ? +selB.value : null; renderBilan(); });
+    const delta = (cur, prev, upGood, isPct) => {
+      if (prev == null) return null;
+      const d = cur - prev; if (Math.abs(d) < (isPct ? 0.0005 : 0.005)) return h('span', { class: 'delta mut', text: `= ${B}` });
+      const good = upGood ? d > 0 : d < 0;
+      return h('span', { class: 'delta ' + (good ? 'pos' : 'neg'), text: `${d > 0 ? '▲' : '▼'} ${isPct ? (Math.abs(d) * 100).toFixed(1).replace('.', ',') + ' pt' : money(Math.abs(d))} vs ${B}` });
+    };
+    const k = (lbl, val, cls, dl, sub) => h('div', { class: 'kpi' }, h('span', { class: 'lbl', text: lbl }), h('span', { class: 'val num ' + cls, text: val }), dl, sub ? h('span', { class: 'sub', text: sub }) : null);
+    const kpis = h('div', { class: 'kpis' },
+      k('Entré', money(a.rev), 'c-in-t', delta(a.rev, bb?.rev, true)),
+      k('Sorti', money(a.out), 'c-out-t', delta(a.out, bb?.out, false), `${money(a.avgOut)} par mois en moyenne`),
+      k('Mis de côté', money(a.save), 'c-save-t', delta(a.save, bb?.save, true), `${pct.format(a.rate)} des revenus`),
+      k('Solde de l’année', money(a.solde), a.solde < 0 ? 'neg' : '', delta(a.solde, bb?.solde, true)));
+    // mois par mois : sorties de A face à B
+    const chart = h('div', { class: 'bil-chart', role: 'img', 'aria-label': `Sorties mensuelles ${A}${B ? ` comparées à ${B}` : ''}` });
+    const mOut = (y, m) => { const t = budget(String(m), y).tot; return t.Factures + t['Dépenses']; };
+    const va = MONTHS.map((_, i) => mOut(A, i + 1)), vb = B ? MONTHS.map((_, i) => mOut(B, i + 1)) : [];
+    const max = Math.max(1, ...va, ...vb);
+    MONTHS.forEach((_, i) => chart.append(h('div', { class: 'bil-col', title: `${MONTHS[i]} : ${money(va[i])}${B ? ` (${B} : ${money(vb[i])})` : ''}` },
+      h('div', { class: 'bil-bars' }, B ? h('i', { class: 'b', style: `height:${vb[i] / max * 100}%` }) : null, h('i', { class: 'a', style: `height:${va[i] / max * 100}%` })),
+      h('span', { class: 'bil-m', text: MSHORT[i] }))));
+    // catégories
+    const rows = [];
+    for (const g of ['Revenus', 'Factures', 'Dépenses', 'Épargnes']) {
+      const cats = [...new Set([...Object.keys(a.b[g]), ...(bb ? Object.keys(bb.b[g]) : [])])];
+      for (const c of cats) { const x = r2(a.b[g][c] || 0), y = bb ? r2(bb.b[g][c] || 0) : null; if (x || y) rows.push({ g, c, x, y }); }
+    }
+    const grpCls = { Revenus: 'c-in-t', Factures: 'c-out-t', Dépenses: 'c-out-t', Épargnes: 'c-save-t' };
+    const table = h('div', { class: 'bil-cats' }, ...['Revenus', 'Factures', 'Dépenses', 'Épargnes'].map(g => {
+      const list = rows.filter(r => r.g === g).sort((p, q) => q.x - p.x); if (!list.length) return null;
+      return h('details', { class: 'bil-g', open: g !== 'Revenus' || null },
+        h('summary', null, h('span', { class: 'bil-gn ' + grpCls[g], text: g }), h('span', { class: 'num', text: money(list.reduce((s, r) => s + r.x, 0)) })),
+        ...list.map(r => { const d = r.y == null ? null : r2(r.x - r.y); const good = d == null ? null : (g === 'Revenus' || g === 'Épargnes') ? d >= 0 : d <= 0;
+          return h('div', { class: 'bil-row' + (B ? '' : ' nob') }, h('span', { class: 't-line' }, glyphIcon({ category: r.c, type: g === 'Revenus' ? 'Revenus' : g === 'Épargnes' ? 'Épargnes' : 'Dépenses' }, 'xs'), h('span', { text: r.c })),
+            h('span', { class: 'num', text: money(r.x) }), B ? h('span', { class: 'num mut', text: money(r.y) }) : null,
+            B ? h('span', { class: 'num ' + (Math.abs(d) < 0.005 ? 'mut' : good ? 'pos' : 'neg'), text: Math.abs(d) < 0.005 ? '=' : sgn(d) }) : null); }));
+    }));
+    box.replaceChildren(
+      h('div', { class: 'bil-head' }, h('h2', { class: 'bil-t', text: `Bilan ${A}` }), h('div', { class: 'bil-sel' }, selA, h('span', { class: 'hint', text: 'comparé à' }), selB)),
+      kpis,
+      h('div', { class: 'card' }, h('h2', { text: 'Sorties mois par mois' }), h('div', { class: 'legend' }, h('span', null, h('i', { class: 'sw', style: 'background:var(--c-out)' }), String(A)), B ? h('span', null, h('i', { class: 'sw', style: 'background:var(--line-strong)' }), String(B)) : null), chart),
+      h('div', { class: 'card' }, h('h2', { text: 'Par catégorie' }), B ? h('div', { class: 'bil-row bil-hd' }, h('span'), h('span', { text: String(A) }), h('span', { text: String(B) }), h('span', { text: 'Écart' })) : null, table));
+  }
   function openSubscriptionPicker() {
     const chosen = new Map();
     openSheet((body, close) => {
@@ -1400,9 +1498,9 @@
           if (!n) { toast('Indique au moins un montant.'); return; }
           commit(); close(); toast(`${n} abonnement${n > 1 ? 's' : ''} ajouté${n > 1 ? 's' : ''} à tes récurrentes.`);
         } });
-        body.replaceChildren(h('h2', { class: 'sheet-t', text: 'Tes abonnements' }),
+        body.replaceChildren(...[h('h2', { class: 'sheet-t', text: 'Tes abonnements' }),
           h('p', { class: 'note', text: 'Touche ceux que tu paies, puis indique le montant et le jour de prélèvement. Les logos viennent d’internet.' }),
-          grid, chosen.size ? h('div', null, h('h3', { class: 'sheet-h3', text: 'Montant et jour' }), rows) : null, h('div', { class: 'sheet-foot' }, add));
+          grid, chosen.size ? h('div', null, h('h3', { class: 'sheet-h3', text: 'Montant et jour' }), rows) : null, h('div', { class: 'sheet-foot' }, add)].filter(Boolean));
       };
       draw();
     }, { label: 'Ajouter des abonnements', wide: true });
@@ -2116,7 +2214,9 @@
           renameCategory(cfg, g, c, v, withData); onChange();
         });
         const move = (d) => { const j = i + d; if (j < 0 || j >= list.length) return; [list[i], list[j]] = [list[j], list[i]]; onChange(); };
-        box.append(h('div', null, h('div', { class: 'cat-row' }, inp,
+        const icb = h('button', { type: 'button', class: 'ic-btn', 'aria-label': `Changer l’icône de ${c}`, title: 'Changer l’icône', onclick: () => openIconPicker(cfg, c, onChange) },
+          (() => { const k = (cfg.catIcons || {})[c] || glyphFor(c, GROUP_TYPE[g]); return h('span', { class: 'ico sm', style: `--hue:${GROUP_COLOR[g]}` }, svgEl(GLYPHS[k])); })());
+        box.append(h('div', null, h('div', { class: 'cat-row' }, icb, inp,
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Monter', text: '↑', disabled: i === 0, onclick: () => move(-1) }),
           h('button', { class: 'btn small ghost', type: 'button', 'aria-label': 'Descendre', text: '↓', disabled: i === list.length - 1, onclick: () => move(1) }),
           h('button', { class: 'btn small ghost danger', type: 'button', 'aria-label': 'Supprimer', title: used ? `Utilisée par ${used} transaction(s) : renomme-la plutôt` : 'Supprimer', text: '✕', disabled: used > 0, onclick: () => {
@@ -2128,7 +2228,7 @@
       const add = h('input', { type: 'text', id: `cat-add-${gi}`, placeholder: 'Nouvelle catégorie' });
       const doAdd = () => { const v = add.value.trim(); if (!v || list.includes(v)) return; list.push(v); add.value = ''; onChange(); setTimeout(() => $(`cat-add-${gi}`)?.focus(), 10); };
       add.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
-      wrap.append(h('div', { class: 'card', style: 'padding:12px' }, h('h3', { style: 'margin-top:0', text: g }), h('p', { class: 'hint', style: 'margin:0 0 8px', text: GROUP_HELP[g] }), box, h('div', { class: 'addrow' }, add, h('button', { class: 'btn small', type: 'button', text: 'Ajouter', onclick: doAdd }))));
+      wrap.append(h('div', { class: 'card cat-card', style: `--gc:${GROUP_COLOR[g]}` }, h('h3', { class: 'cat-h' }, h('i', { class: 'cat-dot' }), g, h('span', { class: 'cat-n', text: String(list.length) })), h('p', { class: 'hint', style: 'margin:0 0 8px', text: GROUP_HELP[g] }), box, h('div', { class: 'addrow' }, add, h('button', { class: 'btn small', type: 'button', text: 'Ajouter', onclick: doAdd }))));
     });
     return wrap;
   }
@@ -2447,6 +2547,8 @@
     
     $('period').addEventListener('change', () => { U.period = $('period').value; if (U.tab === 'transactions' && !U.editing) resetForm(); render(); });
     $('year').addEventListener('change', () => { U.year = +$('year').value; if (U.tab === 'transactions' && !U.editing) resetForm(); render(); });
+    $('prevP').addEventListener('click', () => stepPeriod(-1));
+    $('nextP').addEventListener('click', () => stepPeriod(1));
     document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
     $('toAnalyse').addEventListener('click', () => transition(() => { U.sub.apercu = 'analyse'; render(); window.scrollTo({ top: 0 }); }, 'fwd'));
     $('quickAdd').addEventListener('click', () => { U.sub.transactions = 'ops'; showTab('transactions'); setTimeout(() => { const i = $('ex-in'); if (i) { i.focus(); i.scrollIntoView({ block: 'center' }); } }, 30); });
